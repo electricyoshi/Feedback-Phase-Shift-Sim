@@ -14,6 +14,8 @@ Two views of the classic feedback block diagram  Vdiff = Vin - B*Vout :
      oscillates and grows until it hits the rails.
 
 Runs on the Python standard library only (tkinter).  Python 3.8+.
+feedback_phase_sim.html is a parallel browser version: keep the two in step
+(see "Parity" in CLAUDE.md).
     python feedback_phase_sim.py
 """
 

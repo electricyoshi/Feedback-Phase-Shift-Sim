@@ -4,9 +4,32 @@ Tier 1 teaching utility (EE3722 Module 4.2). Single-file tkinter GUI, stdlib onl
 Python 3.8+. Intended for a **public** GitHub repo — keep it free of machine-specific
 paths and personal details.
 
+## Two implementations, kept in parallel
+- `feedback_phase_sim.py` (tkinter) and `feedback_phase_sim.html` (vanilla JS, one
+  file, no libraries, runs from `file://`) are **both maintained**. Any change to
+  behaviour, model, copy, palette or layout goes into both in the same commit.
+- The HTML mirrors the Python function for function (`LoopSim`, `plot` ~ `Plot.redraw`,
+  `drawDiagram`, `drawPhasor`, `update` ~ `refresh`, `frame` ~ `tick`) to keep diffs
+  comparable. It was written from the design handoff's `.dc.html`, not the bundled
+  export (that is an opaque compressed bundle; don't edit or commit it).
+- Known, accepted differences: browser draws dashes natively (no `dashed_line()`
+  workaround needed); browser F11 is the browser's own full screen; sliders are native
+  `<input type=range>` (log sliders step 0.005 decades vs continuous in Tk).
+- **Parity:** must match exactly - model constants (A0, BETA, FP, VCC, TAU_VIEW1),
+  LoopSim (DT, MASK, NOISE, half-sample correction, rec/trim), phase ranges/defaults
+  (0-360 @0, 95-270 @120), slider ranges/steps/defaults, banner thresholds and copy,
+  plot titles/ticks/units, palette and stage-px sizes.
+- **Planned (not written yet): parity tests** in the test suite. Likely shape: run
+  the HTML's pure functions (loop math, `LoopSim`, banner text, formatters) under
+  node or a headless browser and compare against the Python on a grid of inputs;
+  compare constants/strings by extraction. `LoopSim` noise uses `random`/`Math.random`,
+  so it will need an injectable/seeded noise source (or NOISE=0) to compare traces.
+  Optional later: screenshot comparison of the two UIs at 1024x768.
+
 ## Commands
 - `Feedback Phase Sim.bat` — double-click launcher (no console window).
 - `py feedback_phase_sim.py` — run with a console (use this to see tracebacks).
+- `feedback_phase_sim.html` — open in a browser (F12 console for errors).
 
 ## Non-obvious decisions
 - Launcher uses `start "" pyw ...`: without `start`, cmd waits on the GUI and leaves an

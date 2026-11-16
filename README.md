@@ -12,6 +12,9 @@ On Windows, double-click `Feedback Phase Sim.bat`. Or from a terminal:
 Python 3.8+ and nothing else — it uses only the standard library (tkinter).
 On Linux, tkinter may need `sudo apt install python3-tk`.
 
+**No Python?** Open `feedback_phase_sim.html` in any modern browser (double-click
+it; works offline from the file). It's the same simulation and layout.
+
 ## The two views
 
 **1 · Summing junction only.** The feedback signal is a copy of V<sub>IN</sub> with adjustable

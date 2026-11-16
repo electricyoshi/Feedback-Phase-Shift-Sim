@@ -1,0 +1,593 @@
+<!DOCTYPE html>
+<!--
+  Feedback & Phase Shift demo (EE3722, Module 4.2) - browser version.
+
+  Parallel implementation of feedback_phase_sim.py: same loop model, sim,
+  control ranges, banner thresholds/copy, palette and layout.  Keep the two
+  in step - see "Parity" in CLAUDE.md.  Single file, no libraries, works
+  from file:// (double-click it).  Sizes are stage px on a 1024 x 768 stage
+  scaled to the window, exactly as Z does in the Python version.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Feedback &amp; Phase Shift</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #FFFFFF; overflow: hidden; }
+  #stage {
+    position: absolute; left: 50%; top: 50%; width: 1024px; height: 768px;
+    margin: -384px 0 0 -512px; transform-origin: 50% 50%;
+    background: #FFFFFF; box-sizing: border-box; padding: 12px;
+    display: flex; flex-direction: column; gap: 8px;
+    font-family: Arial, Helvetica, sans-serif; font-weight: 700; color: #111111;
+    user-select: none;
+  }
+  sub { font-size: .68em; vertical-align: -0.3em; line-height: 0; }
+  button {
+    font: inherit; border-radius: 0; cursor: pointer; background: #FFFFFF; color: #111111;
+    border: 3px solid #111111; height: 40px; padding: 0 12px;
+  }
+  button.on { background: #111111; color: #FFFFFF; }
+  .row { display: flex; flex: none; }
+  #header { align-items: center; gap: 10px; height: 52px; }
+  #header button { height: 52px; padding: 0 18px; border-width: 4px; font-size: 22px; }
+  #header #help { width: 52px; padding: 0; font-size: 28px; }
+  #eq { font-size: 28px; white-space: nowrap; margin-right: 6px; }
+  #banner {
+    flex: 1; min-width: 0; color: #FFFFFF; padding: 6px 18px;
+    display: flex; flex-direction: column; justify-content: center; gap: 3px;
+  }
+  #b1 { font-size: 36px; line-height: 1.05; white-space: nowrap; }
+  #b2 { font-size: 22px; line-height: 1.1; }
+  #b3 { font-size: 18px; line-height: 1.1; }
+  #phasebar {
+    align-items: center; gap: 16px; height: 76px; border: 4px solid #111111;
+    box-sizing: border-box; padding: 0 16px;
+  }
+  #track { flex: 1; position: relative; height: 68px; cursor: pointer; touch-action: none; margin: 0 22px; }
+  #track > div { position: absolute; }
+  #footer {
+    height: 56px; align-items: center; gap: 22px; border-top: 4px solid #111111;
+    padding-top: 6px; box-sizing: border-box; font-size: 17px;
+  }
+  #footer > div { display: contents; }
+  #footer button { font-size: 17px; }
+  .slider { flex: 1; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .slider > span { display: flex; justify-content: space-between; white-space: nowrap; }
+  .slider input { width: 100%; margin: 0; height: 18px; accent-color: #111111; }
+  canvas { display: block; }
+  #notes {
+    position: absolute; inset: 0; background: rgba(255,255,255,.6); display: none;
+    align-items: flex-start; justify-content: flex-end; padding: 72px 16px 0 0;
+  }
+  #notes > div {
+    width: 620px; background: #FFFFFF; border: 4px solid #111111; padding: 16px 20px;
+  }
+  #notes h3 { font-size: 20px; margin: 14px 0 4px; }
+  #notes h3:first-child { margin-top: 0; }
+  #notes p { font-size: 17px; color: #555555; margin: 0; white-space: pre-line; }
+  #notes .close { display: block; margin: 16px 0 0 auto; padding: 0 16px; font-size: 17px; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <div id="header" class="row">
+    <button id="tab1" class="on">1 · Summing junction</button>
+    <button id="tab2">2 · Closed loop</button>
+    <div style="flex:1"></div>
+    <div id="eq"><span style="color:#D55E00">V<sub>DIFF</sub></span> = <span style="color:#0072B2">V<sub>IN</sub></span> − βV<sub>OUT</sub></div>
+    <button id="help">?</button>
+  </div>
+
+  <div class="row" style="gap:8px;height:112px">
+    <canvas id="cvD" style="width:292px;height:112px;flex:none"></canvas>
+    <div id="banner"><div id="b1"></div><div id="b2"></div><div id="b3"></div></div>
+  </div>
+
+  <div id="phasebar" class="row">
+    <div style="width:176px;flex:none;white-space:nowrap">
+      <div style="font-size:26px;line-height:1.1">Phase lag</div>
+      <div id="phaseSub" style="font-size:17px;line-height:1.2"></div>
+    </div>
+    <div id="track">
+      <div style="left:0;right:0;top:20px;height:12px;background:#111111"></div>
+      <div id="railHot" style="right:0;top:20px;height:12px;background:#D55E00"></div>
+      <div id="mark" style="top:8px;width:4px;height:36px;margin-left:-2px;background:#D55E00"></div>
+      <div id="markText" style="top:46px;width:80px;margin-left:-40px;text-align:center;font-size:17px;color:#D55E00">180°</div>
+      <div id="thumb" style="top:4px;width:44px;height:44px;margin-left:-22px;box-sizing:border-box;border-radius:50%;background:#FFFFFF;border:7px solid #111111"></div>
+    </div>
+    <div id="phaseVal" style="width:128px;flex:none;text-align:right;font-size:56px;line-height:1"></div>
+  </div>
+
+  <div style="display:flex;gap:8px;flex:1;min-height:0">
+    <div style="width:582px;flex:none;display:flex;flex-direction:column;gap:6px;min-height:0">
+      <canvas id="cvPA" style="flex:1;min-height:0;width:100%"></canvas>
+      <canvas id="cvPB" style="flex:1;min-height:0;width:100%"></canvas>
+    </div>
+    <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:6px;min-height:0">
+      <canvas id="cvR1" style="flex:1;min-height:0;width:100%"></canvas>
+      <canvas id="cvR2" style="flex:1;min-height:0;width:100%"></canvas>
+    </div>
+  </div>
+
+  <div id="footer" class="row">
+    <div id="f1">
+      <label class="slider"><span><span>Feedback size</span><span id="kText"></span></span>
+        <input id="k" type="range" min="0" max="1.5" step="0.01" value="0.9"></label>
+      <label style="flex:none;display:flex;align-items:center;gap:8px;cursor:pointer">
+        <input id="link" type="checkbox" style="width:26px;height:26px;margin:0;accent-color:#111111">
+        <span style="white-space:nowrap">Link phase to frequency</span></label>
+      <label class="slider"><span><span>Signal frequency</span><span id="f1Text"></span></span>
+        <input id="f1in" type="range" min="2" max="5.477" step="0.005" value="3"></label>
+    </div>
+    <div id="f2" style="display:none">
+      <div style="flex:none;display:flex">
+        <button id="sine" class="on">Sine</button><button id="square" style="border-left:0">Square</button>
+      </div>
+      <label class="slider"><span><span>V<sub>IN</sub> amplitude</span><span id="ampText"></span></span>
+        <input id="amp" type="range" min="0" max="3" step="0.1" value="1"></label>
+      <label class="slider"><span><span>V<sub>IN</sub> frequency</span><span id="f2Text"></span></span>
+        <input id="f2in" type="range" min="3" max="5" step="0.005" value="3.69897"></label>
+      <label class="slider"><span><span>Speed</span><span id="speedText"></span></span>
+        <input id="speed" type="range" min="-0.602" max="0.602" step="0.002" value="0"></label>
+      <div style="flex:none;display:flex;gap:8px">
+        <button id="pause" style="width:86px;padding:0">Pause</button>
+        <button id="restart" style="width:86px;padding:0">Restart</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="notes"><div id="notesBody"></div></div>
+</div>
+
+<script>
+'use strict';
+// ---------------------------------------------------------------------------
+// Loop model - must match the constants at the top of feedback_phase_sim.py.
+// A(s) = A0 * exp(-s*tau) / (1 + s/wp), feedback factor BETA.  The delay tau
+// stands in for the amplifier's higher poles: lag without changing |A*B|.
+// ---------------------------------------------------------------------------
+const A0 = 200, BETA = 0.5, FP = 1e3, VCC = 5, L0 = A0 * BETA;
+const FC = FP * Math.sqrt(L0 * L0 - 1);                 // |A*B| = 1 crossover, Hz
+const POLE_PHASE_FC = Math.atan(FC / FP) * 180 / Math.PI;
+const loopMag = f => L0 / Math.hypot(1, f / FP);
+const loopPhase = (f, tau) => Math.atan(f / FP) * 180 / Math.PI + 360 * f * tau;   // lag, deg
+const tauFor = phi => Math.max(0, phi - POLE_PHASE_FC) / (360 * FC);
+function freqForPhase(phi, tau) {         // frequency where the lag = phi (null if never)
+  let lo = 0, hi = 9;
+  if (loopPhase(1e9, tau) < phi) return null;
+  for (let i = 0; i < 60; i++) { const mid = 0.5 * (lo + hi); if (loopPhase(10 ** mid, tau) < phi) lo = mid; else hi = mid; }
+  return 10 ** hi;
+}
+const TAU_VIEW1 = tauFor(150);            // fixed excess delay for view 1's Bode plot
+
+// Time-domain closed loop with rail saturation (forward Euler + delay line).
+class LoopSim {
+  static DT = 2.5e-8; static MASK = 1023; static NOISE = 2e-3;
+  constructor() { this.reset(); }
+  reset() {
+    this.t = 0; this.y = 0; this.ph = 0; this.i = 0; this.cnt = 0;
+    this.hist = new Float64Array(LoopSim.MASK + 1);
+    this.T = []; this.VIN = []; this.VOUT = []; this.VD = [];
+  }
+  run(n, amp, freq, square, tau, rec) {
+    const dt = LoopSim.DT, mask = LoopSim.MASK, hist = this.hist, noise = LoopSim.NOISE;
+    let { i, y, ph, t, cnt } = this;
+    // forward Euler lags an ideal integrator by half a sample: take it out
+    // of the delay line so the loop phase is exactly what was asked
+    const d = Math.max(0, tau / dt - 0.5), k = Math.floor(d), fr = d - k, fr1 = 1 - fr;
+    const dph = 2 * Math.PI * freq * dt, g = dt * 2 * Math.PI * FP, PI = Math.PI, TWO = 2 * Math.PI;
+    for (let q = 0; q < n; q++) {
+      ph += dph; if (ph >= TWO) ph -= TWO;
+      const vin = square ? (ph < PI ? amp : -amp) : amp * Math.sin(ph);
+      const j = (i - k) & mask;
+      const vout = hist[j] * fr1 + hist[(j - 1) & mask] * fr;
+      const vd = vin - BETA * vout;
+      y += g * (A0 * (vd + (Math.random() - 0.5) * noise) - y);
+      if (y > VCC) y = VCC; else if (y < -VCC) y = -VCC;
+      i = (i + 1) & mask; hist[i] = y; t += dt; cnt++;
+      if (cnt >= rec) { cnt = 0; this.T.push(t); this.VIN.push(vin); this.VOUT.push(vout); this.VD.push(vd); }
+    }
+    Object.assign(this, { i, y, ph, t, cnt });
+  }
+  trim(span) {
+    const i0 = lowerBound(this.T, this.t - span);
+    if (i0 > 200) for (const a of [this.T, this.VIN, this.VOUT, this.VD]) a.splice(0, i0);
+  }
+}
+function lowerBound(a, v) { let lo = 0, hi = a.length; while (lo < hi) { const m = (lo + hi) >> 1; if (a[m] < v) lo = m + 1; else hi = m; } return lo; }
+
+// ---------------------------------------------------------------------------
+// Palette (same tokens as the C_* constants in the Python)
+// ---------------------------------------------------------------------------
+const C = { VIN: '#0072B2', FB: '#111111', DIFF: '#D55E00', OUT: '#009E73', OFF: '#6B7075',
+  GRID: '#D0D4D9', ZERO: '#777777', INK: '#111111', GOOD: '#00735C', BAD: '#B84300',
+  MID: '#555555', CIRCLE: '#DDF3EC', PAXIS: '#B0B5BB' };
+const DASH = [9, 6];
+const SWEEP_S = 6.0;                      // real seconds per screen-width of sim time
+
+const NOTES = [
+  ['The phase slider means something different in each view',
+   '• View 1: the lag of the feedback signal relative to V_{IN}.\n' +
+   '• View 2: the phase of the loop gain Aβ at crossover (|Aβ| = 1). That is ' +
+   'what decides stability, not the phase at the input frequency.'],
+  ['The amplifier model uses a delay for the extra phase',
+   'A = 200 with one pole at 1 kHz and β = 0.5, so the closed-loop gain is ' +
+   'about 2 and crossover is near 100 kHz. A pure time delay stands in for ' +
+   "the amplifier's higher poles. A delay adds lag without changing |Aβ|, " +
+   'which is what lets one slider move only the phase curve.'],
+  ['Feedback size in view 1 is manual',
+   '"Link phase to frequency" ties only the phase to the Bode plot. The ' +
+   'amplitude of the feedback signal stays wherever the Feedback size ' +
+   'slider puts it.'],
+  ['Keys',
+   '• ← / →  nudge the phase 1°  (Shift: 10°)\n' +
+   '• Space  pause / run\n' +
+   '• F11  full screen    Esc  close these notes'],
+];
+
+// ---------------------------------------------------------------------------
+// Formatting and V_{SUB} markup
+// ---------------------------------------------------------------------------
+const fmtNum = v => String(parseFloat(v.toPrecision(3))).replace('-', '−');
+const fmtFreq = f => f >= 1e6 ? (f / 1e6) + 'M' : f >= 1e3 ? (f / 1e3) + 'k' : String(f);
+const fmtHz = f => fmtFreq(parseFloat(f.toPrecision(3))) + 'Hz';
+const esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+const subHtml = s => esc(s).replace(/_\{([^}]*)\}/g, '<sub>$1</sub>');
+function niceTicks(lo, hi, n) {
+  const raw = (hi - lo) / n, mag = 10 ** Math.floor(Math.log10(raw));
+  let step = 10 * mag;
+  for (const m of [1, 2, 2.5, 5]) if (raw <= m * mag) { step = m * mag; break; }
+  const out = [];
+  for (let v = Math.ceil(lo / step - 1e-9) * step; v <= hi + step * 1e-6; v += step) out.push(Math.abs(v) < step * 1e-9 ? 0 : v);
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// State (mirrors App's controls: mode, link, shape, paused, phase_by_mode, sliders)
+// ---------------------------------------------------------------------------
+const S = { mode: 1, k: 0.9, link: false, f1: 1000, shape: 'sine', amp: 1, f2: 5000,
+  speed: 1, paused: false, ph: { 1: 0, 2: 120 } };
+const sim = new LoopSim();
+let dirty = true, carry = 0, last = performance.now();
+const $ = id => document.getElementById(id);
+const cv = { d: $('cvD'), pa: $('cvPA'), pb: $('cvPB'), r1: $('cvR1'), r2: $('cvR2') };
+
+const range = () => S.mode === 1 ? [0, 360] : [95, 270];
+function setPhase(v) {
+  const [lo, hi] = range();
+  v = Math.min(hi, Math.max(lo, Math.round(v)));
+  if (S.mode === 1 && S.link) {
+    S.f1 = Math.min(3e5, Math.max(100, freqForPhase(v, TAU_VIEW1) || 3e5));
+    linkPhaseToF1();
+  } else S.ph[S.mode] = v;
+  update();
+}
+// phase follows the Bode plot at f1 (rounded to the 1 deg step, like the Python slider)
+function linkPhaseToF1() { S.ph[1] = Math.round(Math.min(360, loopPhase(S.f1, TAU_VIEW1))); }
+
+// ---------------------------------------------------------------------------
+// Canvas helpers
+// ---------------------------------------------------------------------------
+function ctxFor(c) {
+  const w = c.clientWidth, h = c.clientHeight, R = Math.max(2, window.devicePixelRatio || 1);
+  if (!w || !h) return null;
+  if (c.width !== Math.round(w * R) || c.height !== Math.round(h * R)) { c.width = Math.round(w * R); c.height = Math.round(h * R); }
+  const ctx = c.getContext('2d');
+  ctx.setTransform(R, 0, 0, R, 0, 0); ctx.clearRect(0, 0, w, h);
+  ctx.lineJoin = 'miter'; ctx.lineCap = 'butt'; ctx.setLineDash([]);
+  return { ctx, w, h };
+}
+const font = size => 'bold ' + size + 'px Arial, Helvetica, sans-serif';
+function richW(ctx, s, size) {
+  let w = 0;
+  s.split(/_\{([^}]*)\}/).forEach((p, i) => { ctx.font = font(i % 2 ? size * 0.68 : size); w += ctx.measureText(p).width; });
+  return w;
+}
+function rich(ctx, x, y, s, size, color, align) {       // canvas text with V_{SUB}
+  const w = richW(ctx, s, size);
+  let left = align === 'left' ? x : align === 'right' ? x - w : x - w / 2;
+  ctx.fillStyle = color; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+  s.split(/_\{([^}]*)\}/).forEach((p, i) => {
+    ctx.font = font(i % 2 ? size * 0.68 : size);
+    ctx.fillText(p, left, y + (i % 2 ? size * 0.3 : 0)); left += ctx.measureText(p).width;
+  });
+}
+
+// One plot (mirrors the Python Plot class: margins, ticks, unit on last tick,
+// legend top-right, marker lines under traces, labels and dots on top).
+function plot(c, o) {
+  const cc = ctxFor(c); if (!cc) return;
+  const { ctx, w, h } = cc;
+  const l = 46, r = w - 10, t = 30, b = h - (o.noX ? 8 : 24);
+  const lx = v => o.logx ? Math.log10(Math.max(v, 1e-12)) : v;
+  const x0 = lx(o.xr[0]), ax = (r - l) / (lx(o.xr[1]) - x0), y0 = o.yr[0], ay = (b - t) / (o.yr[1] - o.yr[0]);
+  const px = v => Math.min(r, Math.max(l, l + (lx(v) - x0) * ax)), py = v => Math.min(b, Math.max(t, b - (v - y0) * ay));
+  const seg = (xa, ya, xb, yb, col, wd, dash) => { ctx.beginPath(); ctx.setLineDash(dash || []); ctx.strokeStyle = col; ctx.lineWidth = wd; ctx.moveTo(xa, ya); ctx.lineTo(xb, yb); ctx.stroke(); ctx.setLineDash([]); };
+  const xt = (o.xticks || niceTicks(o.xr[0], o.xr[1], 4)).filter(v => v >= o.xr[0] && v <= o.xr[1]);
+  xt.forEach((v, i) => {
+    const p = px(v);
+    seg(p, t, p, b, C.GRID, 2);
+    if (o.noX) return;
+    const txt = (o.xfmt || fmtNum)(v) + (i === xt.length - 1 && o.xunit ? ' ' + o.xunit : '');
+    ctx.font = font(15); ctx.fillStyle = C.INK; ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
+    const tw = ctx.measureText(txt).width;
+    ctx.fillText(txt, Math.min(r - tw, Math.max(l, p - tw / 2)), b + 14);
+  });
+  o.yticks.forEach(v => {
+    const q = py(v);
+    seg(l, q, r, q, v === 0 ? C.ZERO : C.GRID, 2);
+    ctx.font = font(15); ctx.fillStyle = C.INK; ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+    ctx.fillText(fmtNum(v), l - 6, q);
+  });
+  (o.hlines || []).forEach(hl => { const q = py(hl.y); seg(l, q, r, q, hl.color, 3, DASH); });
+  (o.vlines || []).forEach(v => { if (v.x != null && v.x >= o.xr[0] && v.x <= o.xr[1]) { const p = px(v.x); seg(p, t, p, b, v.color, 3, v.dash); } });
+  o.series.forEach(s => {
+    if (s.xs.length < 2) return;
+    ctx.beginPath(); ctx.setLineDash(s.dash || []); ctx.strokeStyle = s.color; ctx.lineWidth = s.width;
+    for (let i = 0; i < s.xs.length; i++) { const p = px(s.xs[i]), q = py(s.ys[i]); if (i) ctx.lineTo(p, q); else ctx.moveTo(p, q); }
+    ctx.stroke(); ctx.setLineDash([]);
+  });
+  // +/-V_CC labels on a white box, above the traces
+  (o.hlines || []).forEach(hl => { if (!hl.text) return; const q = py(hl.y) + (hl.below ? 14 : -14), tw = richW(ctx, hl.text, 16); ctx.fillStyle = '#FFFFFF'; ctx.fillRect(l + 5, q - 10, tw + 8, 21); rich(ctx, l + 9, q, hl.text, 16, hl.color, 'left'); });
+  ctx.strokeStyle = C.INK; ctx.lineWidth = 3; ctx.strokeRect(l, t, r - l, b - t);
+  (o.dots || []).forEach(d => {
+    if (d.x == null || d.x < o.xr[0] || d.x > o.xr[1]) return;
+    ctx.beginPath(); ctx.arc(px(d.x), py(d.y), 8, 0, 2 * Math.PI); ctx.fillStyle = d.color; ctx.fill(); ctx.strokeStyle = '#FFFFFF'; ctx.lineWidth = 2.5; ctx.stroke();
+  });
+  (o.texts || []).forEach(tx => { if (tx.x >= o.xr[0] && tx.x <= o.xr[1]) rich(ctx, px(tx.x) + tx.dx, t + tx.dy, tx.text, 16, tx.color, tx.align); });
+  rich(ctx, l, 14, o.title, 19, C.INK, 'left');
+  let x = r;
+  (o.series || []).filter(s => s.label).reverse().forEach(s => {
+    x -= richW(ctx, s.label, 19); rich(ctx, x, 14, s.label, 19, s.color, 'left');
+    x -= 6; seg(x - 30, 13, x, 13, s.color, 5, s.dash); x -= 46;
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Drawing (mirrors App.tick / refresh / draw_diagram / draw_phasor)
+// ---------------------------------------------------------------------------
+function drawTime() {
+  if (S.mode === 1) {
+    const k = S.k, f = S.f1, phi = S.ph[1] * Math.PI / 180, n = 300, span = 2.5 / f;
+    const unit = span >= 2e-3 ? 'ms' : 'µs', mul = span >= 2e-3 ? 1e3 : 1e6;
+    const xs = [], vin = [], vfb = [], vd = [];
+    for (let i = 0; i <= n; i++) {
+      const th = 2 * Math.PI * 2.5 * i / n;
+      xs.push(th / (2 * Math.PI * f) * mul); vin.push(Math.sin(th)); vfb.push(k * Math.sin(th - phi)); vd.push(vin[i] - vfb[i]);
+    }
+    const lim = Math.ceil((1 + k) * 1.05 * 2) / 2, base = { xr: [0, span * mul], yr: [-lim, lim], yticks: [-lim, 0, lim], xunit: unit };
+    plot(cv.pa, { ...base, title: 'Into the summer',
+      series: [{ xs, ys: vin, color: C.VIN, width: 3.5, label: 'V_{IN}' }, { xs, ys: vfb, color: C.FB, width: 3, dash: [11, 7], label: 'V_{FB}' }] });
+    plot(cv.pb, { ...base, title: 'Out of the summer',
+      series: [{ xs, ys: vin, color: C.VIN, width: 2.5, label: 'V_{IN}' }, { xs, ys: vd, color: C.DIFF, width: 4, label: 'V_{DIFF}' }] });
+  } else {
+    const span = Math.min(1e-3, Math.max(1e-4, 2.5 / S.f2)), i0 = lowerBound(sim.T, sim.t - span);
+    const xs = [], fb = [];
+    for (let i = i0; i < sim.T.length; i++) { xs.push((sim.T[i] - sim.t) * 1e3); fb.push(BETA * sim.VOUT[i]); }
+    const vin = sim.VIN.slice(i0), base = { xr: [-span * 1e3, 0], yr: [-VCC * 1.2, VCC * 1.2], yticks: [-VCC, 0, VCC], xunit: 'ms' };
+    plot(cv.pa, { ...base, title: 'At the summer',
+      series: [{ xs, ys: vin, color: C.VIN, width: 3, label: 'V_{IN}' }, { xs, ys: fb, color: C.FB, width: 2.5, dash: DASH, label: 'βV_{OUT}' },
+               { xs, ys: sim.VD.slice(i0), color: C.DIFF, width: 3, label: 'V_{DIFF}' }] });
+    plot(cv.pb, { ...base, title: 'Output',
+      hlines: [{ y: VCC, color: C.MID, text: '+V_{CC}', below: true }, { y: -VCC, color: C.MID, text: '−V_{CC}' }],
+      series: [{ xs, ys: vin, color: C.VIN, width: 2.5, label: 'V_{IN}' }, { xs, ys: sim.VOUT.slice(i0), color: C.OUT, width: 3.5, label: 'V_{OUT}' }] });
+  }
+}
+
+function drawStatic() {
+  drawDiagram();
+  const tau = S.mode === 1 ? TAU_VIEW1 : tauFor(S.ph[2]);
+  const fsig = S.mode === 1 ? (S.link ? S.f1 : null) : S.f2;
+  const f180 = freqForPhase(180, tau), bf = [], mag = [], ph = [];
+  for (let i = 0; i <= 240; i++) { const f = 10 ** (2 + 4 * i / 240); bf.push(f); mag.push(20 * Math.log10(loopMag(f))); ph.push(-loopPhase(f, tau)); }
+  const vlines = [{ x: FC, color: C.MID, dash: DASH }, { x: f180, color: C.DIFF, dash: DASH }, { x: fsig, color: C.VIN }];
+  const xb = { xr: [100, 1e6], logx: true, xticks: [100, 1e3, 1e4, 1e5, 1e6], xfmt: fmtFreq, vlines };
+  const magPlot = { ...xb, title: '|Aβ|  (dB)', yr: [-30, 50], yticks: [-20, 0, 20, 40], noX: true,
+    hlines: [{ y: 0, color: C.MID }], series: [{ xs: bf, ys: mag, color: C.INK, width: 3.5 }],
+    texts: [{ x: FC, dx: -8, dy: 16, text: '|Aβ| = 1', color: C.MID, align: 'right' }],
+    dots: [{ x: FC, y: 0, color: C.MID }, { x: f180, y: f180 ? 20 * Math.log10(loopMag(f180)) : 0, color: C.DIFF },
+           { x: fsig, y: fsig ? 20 * Math.log10(loopMag(fsig)) : 0, color: C.VIN }] };
+  const phPlot = { ...xb, title: 'Phase of Aβ  (°)', yr: [-360, 0], yticks: [-360, -180, 0], xunit: 'Hz',
+    hlines: [{ y: -180, color: C.DIFF }], series: [{ xs: bf, ys: ph, color: C.INK, width: 3.5 }],
+    dots: [{ x: FC, y: -loopPhase(FC, tau), color: C.MID }, { x: f180, y: -180, color: C.DIFF },
+           { x: fsig, y: fsig ? -loopPhase(fsig, tau) : 0, color: C.VIN }] };
+  if (S.mode === 1) { drawPhasor(); if (S.link) plot(cv.r2, phPlot); }
+  else { plot(cv.r1, magPlot); plot(cv.r2, phPlot); }
+}
+
+function drawDiagram() {     // original 400 x 154 geometry scaled 0.73 into 292 x 112
+  const cc = ctxFor(cv.d); if (!cc) return;
+  const { ctx } = cc, m = S.mode, u = 0.73, loop = m === 2 ? C.INK : C.OFF, y = 50, fy = 112;
+  ctx.scale(u, u); ctx.lineWidth = 3.6;
+  const line = (pts, col, arrow) => {
+    ctx.strokeStyle = col; ctx.beginPath(); ctx.moveTo(pts[0], pts[1]);
+    const n = pts.length, ex = pts[n - 2], ey = pts[n - 1];
+    const dx = ex - pts[n - 4], dy = ey - pts[n - 3], L = Math.hypot(dx, dy), ux = dx / L, uy = dy / L;
+    for (let i = 2; i < n - 2; i += 2) ctx.lineTo(pts[i], pts[i + 1]);
+    ctx.lineTo(arrow ? ex - ux * 8 : ex, arrow ? ey - uy * 8 : ey); ctx.stroke();
+    if (arrow) { ctx.fillStyle = col; ctx.beginPath(); ctx.moveTo(ex, ey); ctx.lineTo(ex - ux * 13 - uy * 6, ey - uy * 13 + ux * 6); ctx.lineTo(ex - ux * 13 + uy * 6, ey - uy * 13 - ux * 6); ctx.fill(); }
+  };
+  const circ = (x, yy, r, stroke, fill) => { ctx.beginPath(); ctx.arc(x, yy, r, 0, 2 * Math.PI); if (fill) { ctx.fillStyle = fill; ctx.fill(); } if (stroke) { ctx.strokeStyle = stroke; ctx.stroke(); } };
+  const text = (x, yy, t, col, size) => rich(ctx, x, yy, t, (size || 18) * 1.2, col || C.INK, 'center');
+  text(22, y, 'V_{IN}', C.VIN, 20);
+  circ(46, y, 4, C.INK); line([50, y, 101, y], C.INK, true);
+  circ(116, y, 15, C.INK, '#FFFFFF'); text(116, y + 1, 'Σ');
+  text(90, y - 13, '+'); text(101, y + 27, '−', C.INK, 22);
+  line([131, y, 205, y], C.INK, true); text(168, y - 18, 'V_{DIFF}', C.DIFF, 20);
+  ctx.beginPath(); ctx.moveTo(205, y - 22); ctx.lineTo(205, y + 22); ctx.lineTo(250, y); ctx.closePath();
+  ctx.fillStyle = '#FFFFFF'; ctx.fill(); ctx.strokeStyle = loop; ctx.stroke();
+  text(220, y + 1, 'A', loop);
+  line([250, y, 330, y], loop, true); circ(334, y, 4, loop);
+  text(367, y, 'V_{OUT}', m === 2 ? C.OUT : C.OFF, 20);
+  if (m === 2) {
+    circ(290, y, 5, null, C.INK); line([290, y, 290, fy, 240, fy], C.INK, true);
+    ctx.fillStyle = '#FFFFFF'; ctx.fillRect(206, fy - 15, 34, 30); ctx.strokeStyle = C.INK; ctx.strokeRect(206, fy - 15, 34, 30);
+    text(223, fy + 1, 'β'); line([206, fy, 116, fy, 116, y + 15], C.INK, true);
+    text(165, fy + 18, 'βV_{OUT}', C.FB, 20);
+  } else {
+    line([290, y, 290, fy, 240, fy], C.OFF);
+    ctx.strokeStyle = C.OFF; ctx.strokeRect(206, fy - 15, 34, 30); text(223, fy + 1, 'β', C.OFF);
+    circ(182, fy, 12, C.FB, '#FFFFFF'); text(182, fy, '~', C.FB, 22);
+    line([170, fy, 116, fy, 116, y + 15], C.FB, true);
+    text(143, fy + 18, 'V_{FB}', C.FB, 20);
+    text(292, fy + 30, 'loop not connected', C.OFF, 17);
+  }
+}
+
+function drawPhasor() {
+  const cc = ctxFor(cv.r1); if (!cc) return;
+  const { ctx, w, h } = cc, k = S.k, phi = S.ph[1] * Math.PI / 180, top = 30, bot = 26;
+  const sc = Math.min(w / 3.9, (h - top - bot) / 3.15), ox = w / 2 - 0.7 * sc, oy = top + (h - top - bot) / 2;
+  const P = (x, y) => [ox + x * sc, oy - y * sc];
+  rich(ctx, 4, 14, 'V_{DIFF} = V_{IN} − V_{FB}', 19, C.INK, 'left');
+  ctx.beginPath(); ctx.arc(ox, oy, sc, 0, 2 * Math.PI); ctx.fillStyle = C.CIRCLE; ctx.fill();
+  ctx.setLineDash([10, 7]); ctx.strokeStyle = C.OUT; ctx.lineWidth = 3.5; ctx.stroke(); ctx.setLineDash([]);
+  ctx.strokeStyle = C.PAXIS; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(...P(-1.25, 0)); ctx.lineTo(...P(2.6, 0)); ctx.moveTo(...P(0, -1.6)); ctx.lineTo(...P(0, 1.6)); ctx.stroke();
+  const dx = 1 - k * Math.cos(phi), dy = k * Math.sin(phi), mag = Math.hypot(dx, dy);
+  const arrow = (a, b, col, wd, dash) => {
+    const [xa, ya] = P(...a), [xb, yb] = P(...b), L = Math.hypot(xb - xa, yb - ya);
+    if (L < 1) return;
+    const ux = (xb - xa) / L, uy = (yb - ya) / L, hl = Math.min(18, L);
+    ctx.strokeStyle = col; ctx.lineWidth = wd; ctx.setLineDash(dash || []); ctx.beginPath(); ctx.moveTo(xa, ya); ctx.lineTo(xb - ux * hl * 0.8, yb - uy * hl * 0.8); ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle = col; ctx.beginPath(); ctx.moveTo(xb, yb); ctx.lineTo(xb - ux * hl - uy * 8, yb - uy * hl + ux * 8); ctx.lineTo(xb - ux * hl + uy * 8, yb - uy * hl - ux * 8); ctx.fill();
+  };
+  arrow([0, 0], [1, 0], C.VIN, 6);
+  if (k > 0.02) arrow([1, 0], [dx, dy], C.FB, 5, [10, 6]);
+  if (mag > 0.03) arrow([0, 0], [dx, dy], C.DIFF, 7);
+  const below = dy >= 0;
+  rich(ctx, P(0.5, 0)[0], oy + (below ? 18 : -18), 'V_{IN}', 20, C.VIN, 'center');
+  // a short V_DIFF (near 0 deg) would sit on V_IN and -V_FB: move it up-left
+  const tiny = mag < 0.35, ux = tiny ? 0 : dx / mag, uy = tiny ? (below ? 1 : -1) : dy / mag, tip = P(dx, dy);
+  rich(ctx, tip[0] + ux * 34 - (tiny ? 26 : 0), tip[1] - uy * (tiny ? 26 : 20), 'V_{DIFF}', 20, C.DIFF, 'center');
+  if (k > 0.02) {
+    let nx = Math.sin(phi), ny = Math.cos(phi); const mx = (1 + dx) / 2, my = dy / 2;
+    if (nx * mx + ny * my < 0) { nx = -nx; ny = -ny; }
+    const q = P(mx, my);
+    rich(ctx, q[0] + nx * 34, q[1] - ny * 20, '−V_{FB}', 20, C.FB, 'center');
+  }
+  rich(ctx, w / 2, h - 12, 'inside the circle:  |V_{DIFF}| < |V_{IN}|', 17, C.GOOD, 'center');
+}
+
+// ---------------------------------------------------------------------------
+// DOM state -> page (banner, phase bar, footer values, which panels show)
+// ---------------------------------------------------------------------------
+function update() {
+  const m = S.mode, ph = S.ph[m], [lo, hi] = range();
+  let bg, b1, b2, b3 = '';
+  if (m === 1) {
+    const phi = ph * Math.PI / 180, ratio = Math.hypot(1 - S.k * Math.cos(phi), S.k * Math.sin(phi));
+    b1 = '|V_{DIFF}| = ' + ratio.toFixed(2) + ' × |V_{IN}|';
+    if (ratio < 0.995) { bg = C.GOOD; b2 = 'Negative feedback — the difference shrinks'; }
+    else if (ratio > 1.005) { bg = C.BAD; b2 = 'Positive feedback — the difference grows'; }
+    else { bg = C.MID; b2 = 'Rotated, but not shrunk'; }
+  } else {
+    const pm = 180 - ph, f180 = freqForPhase(180, tauFor(ph)), gm = f180 ? -20 * Math.log10(loopMag(f180)) : null;
+    b1 = 'Phase margin ' + (pm > 0 ? '+' : pm < 0 ? '−' : '') + Math.abs(pm).toFixed(0) + '°';
+    if (pm > 0.5) { bg = C.GOOD; b2 = pm >= 45 ? 'Stable — ringing dies out' : 'Stable, but barely — heavy ringing'; }
+    else if (pm < -0.5) { bg = C.BAD; b2 = 'Unstable — grows until it hits the ±' + VCC + ' V rails'; }
+    else { bg = C.MID; b2 = 'On the edge — sustained oscillation'; }
+    if (gm != null) b3 = 'Gain margin ' + (gm >= 0 ? '+' : '−') + Math.abs(gm).toFixed(1) + ' dB';
+  }
+  $('banner').style.background = bg;
+  $('b1').innerHTML = subHtml(b1); $('b2').textContent = b2; $('b3').textContent = b3;
+  $('b3').style.display = b3 ? '' : 'none';
+
+  const alert = m === 1 ? ph >= 180 : ph > 180, ink = alert ? C.DIFF : C.INK;
+  const pct = v => ((v - lo) / (hi - lo) * 100) + '%';
+  $('phaseSub').textContent = m === 1 ? 'of feedback signal' : 'of Aβ where |Aβ| = 1';
+  $('phaseVal').textContent = ph.toFixed(0) + '°'; $('phaseVal').style.color = ink;
+  $('thumb').style.left = pct(ph); $('thumb').style.borderColor = ink;
+  for (const id of ['railHot', 'mark', 'markText']) $(id).style.left = pct(180);
+
+  $('tab1').classList.toggle('on', m === 1); $('tab2').classList.toggle('on', m === 2);
+  $('f1').style.display = m === 1 ? 'contents' : 'none'; $('f2').style.display = m === 2 ? 'contents' : 'none';
+  // right column: view 1 phasor (+ Bode phase when linked), view 2 both Bode plots
+  cv.r1.style.flex = m === 1 ? '2.2' : '1';
+  cv.r2.style.display = (m === 2 || S.link) ? 'block' : 'none';
+
+  $('k').value = S.k; $('kText').textContent = S.k.toFixed(2);
+  $('link').checked = S.link;
+  $('f1Text').textContent = fmtHz(S.f1); $('f1in').value = Math.log10(S.f1);
+  $('ampText').textContent = S.amp.toFixed(1) + ' V';
+  $('f2Text').textContent = fmtHz(S.f2);
+  $('speedText').textContent = parseFloat(S.speed.toPrecision(2)) + '×';
+  $('sine').classList.toggle('on', S.shape === 'sine'); $('square').classList.toggle('on', S.shape === 'square');
+  $('pause').textContent = S.paused ? 'Run' : 'Pause';
+  dirty = true;
+}
+
+// ---------------------------------------------------------------------------
+// Wiring
+// ---------------------------------------------------------------------------
+function setMode(m) {
+  if (m === S.mode) return;
+  S.mode = m;
+  if (m === 2) { sim.reset(); carry = 0; }            // restart on entering view 2
+  update();
+}
+$('tab1').onclick = () => setMode(1);
+$('tab2').onclick = () => setMode(2);
+$('k').oninput = e => { S.k = +e.target.value; update(); };
+$('link').onchange = e => { S.link = e.target.checked; if (S.link) linkPhaseToF1(); update(); };
+$('f1in').oninput = e => { S.f1 = Math.min(3e5, 10 ** +e.target.value); if (S.link) linkPhaseToF1(); update(); };
+$('amp').oninput = e => { S.amp = +e.target.value; update(); };
+$('f2in').oninput = e => { S.f2 = 10 ** +e.target.value; update(); };
+$('speed').oninput = e => { S.speed = 10 ** +e.target.value; update(); };
+$('sine').onclick = () => { S.shape = 'sine'; update(); };
+$('square').onclick = () => { S.shape = 'square'; update(); };
+const togglePause = () => { S.paused = !S.paused; update(); };
+$('pause').onclick = togglePause;
+$('restart').onclick = () => { sim.reset(); carry = 0; };
+for (const b of document.querySelectorAll('button')) b.addEventListener('mousedown', e => e.preventDefault());  // no focus -> Space stays "pause"
+
+const track = $('track');
+const trackSet = e => { const r = track.getBoundingClientRect(), [lo, hi] = range(); setPhase(lo + (hi - lo) * (e.clientX - r.left) / r.width); };
+track.onpointerdown = e => { track.setPointerCapture(e.pointerId); trackSet(e); };
+track.onpointermove = e => { if (e.buttons) trackSet(e); };
+
+const notes = $('notes');
+$('notesBody').innerHTML = NOTES.map(([h, b]) => '<h3>' + subHtml(h) + '</h3><p>' + subHtml(b) + '</p>').join('') +
+  '<button class="close">Close</button>';
+const showNotes = on => { notes.style.display = on ? 'flex' : 'none'; $('help').classList.toggle('on', on); };
+$('help').onclick = () => showNotes(notes.style.display !== 'flex');
+notes.onclick = e => { if (e.target === notes || e.target.classList.contains('close')) showNotes(false); };
+
+window.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT' && e.target.type === 'range' && e.key.startsWith('Arrow')) e.target.blur();
+  if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+    e.preventDefault(); setPhase(S.ph[S.mode] + (e.key === 'ArrowLeft' ? -1 : 1) * (e.shiftKey ? 10 : 1));
+  } else if (e.key === ' ') { e.preventDefault(); togglePause(); }
+  else if (e.key === 'Escape') showNotes(false);
+}, true);
+
+function fit() {                          // scale the 1024 x 768 stage to the window
+  const z = Math.min(window.innerWidth / 1024, window.innerHeight / 768) || 1;
+  $('stage').style.transform = 'scale(' + z + ')';
+  dirty = true;
+}
+window.addEventListener('resize', fit);
+
+function frame(now) {
+  requestAnimationFrame(frame);
+  const el = Math.min((now - last) / 1000, 0.1);
+  last = now;
+  if (S.mode === 2) {
+    const span = Math.min(1e-3, Math.max(1e-4, 2.5 / S.f2));
+    if (!S.paused) {
+      const steps = el * span * S.speed / SWEEP_S / LoopSim.DT + carry, n = Math.floor(steps);
+      carry = steps - n;
+      sim.run(n, S.amp, S.f2, S.shape === 'square', tauFor(S.ph[2]), Math.max(1, Math.round(span / LoopSim.DT / 1600)));
+      sim.trim(span);
+    }
+    drawTime();
+  }
+  if (dirty) { dirty = false; drawStatic(); if (S.mode === 1) drawTime(); }
+}
+fit(); update();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
