@@ -103,6 +103,15 @@ def time_unit(span):
     return ("ms", 1e3) if span >= 2e-3 else ("µs", 1e6)
 
 
+def phase_label(mode):
+    """(title, sub-line) of the big phase slider.  View 1 imposes a lag on the
+    fed-back signal; in view 2 the same slider picks the loop's lag at crossover,
+    i.e. a different amplifier, so it is named differently."""
+    if mode == 1:
+        return "Phase lag", "of feedback signal"
+    return "Feedback Phase Lag", "of Aβ where |Aβ| = 1"
+
+
 class LoopSim:
     """Time-domain closed loop with rail saturation (forward Euler + delay line)."""
     DT = 2.5e-8
@@ -803,16 +812,18 @@ class PhaseBar(_Track):
     H = 76
 
     def __init__(self, parent, lo, hi, init, on_change):
-        self.sub, self.alert = "", False
+        self.title, self.sub, self.alert = "Phase lag", "", False
         super().__init__(parent, lo, hi, init, on_change, step=1.0)
 
     def rail(self):
         # border 4 + pad 16 + label block 176 + gap 16 + thumb room 22 = 234;
-        # right side the same with the 128-wide readout
-        return 234 * Z, self.cv.winfo_width() - 186 * Z
+        # right side the same with the 128-wide readout.  The label block
+        # grows (and the rail shrinks) when the title is wider than 176.
+        x0 = max(234 * Z, rich_width(bold(26), self.title) + 58 * Z)
+        return x0, self.cv.winfo_width() - 186 * Z
 
-    def set_sub(self, text):
-        self.sub = text
+    def set_label(self, title, sub):
+        self.title, self.sub = title, sub
         self.draw()
 
     def set_alert(self, on):
@@ -829,7 +840,7 @@ class PhaseBar(_Track):
         ink = C_DIFF if self.alert else C_INK
         bw = zs(4)
         cv.create_rectangle(bw / 2, bw / 2, w - bw / 2, h - bw / 2, width=bw, outline=C_INK)
-        draw_rich(cv, 20 * Z, 28 * Z, "Phase lag", bold(26), C_INK, "w")
+        draw_rich(cv, 20 * Z, 28 * Z, self.title, bold(26), C_INK, "w")
         draw_rich(cv, 20 * Z, 52 * Z, self.sub, bold(17), C_INK, "w")
         x0, x1 = self.rail()
         xm = x0 + self.frac(180.0) * (x1 - x0)
@@ -1004,7 +1015,7 @@ class App:
                               padx=18, gap=10)
         self.tabs.cv.pack(side="left")
         self.help_btn = ButtonBar(header, ["?"], lambda i: self.toggle_help(),
-                                  size=28, height=52, border=4, width=52)
+                                  size=14, height=26, border=2, width=26)
         self.help_btn.cv.pack(side="right")
         self.eq = tk.Canvas(header, bg=BG, highlightthickness=0, width=1, height=1)
         self.eq.pack(side="right")
@@ -1255,7 +1266,7 @@ class App:
         pa, pb = self.pa, self.pb
         if m == 1:
             self.s_phase.set_range(0.0, 360.0)
-            self.s_phase.set_sub("of feedback signal")
+            self.s_phase.set_label(*phase_label(1))
             pa.configure(title="Into the summer")
             pb.configure(title="Out of the summer")
             pb.hlines = []
@@ -1268,7 +1279,7 @@ class App:
             self.bp.configure(xrange=BODE_X1)
         else:
             self.s_phase.set_range(95.0, 270.0)
-            self.s_phase.set_sub("of Aβ where |Aβ| = 1")
+            self.s_phase.set_label(*phase_label(2))
             lim = VCC * 1.2
             pa.configure(title="At the summer", yrange=(-lim, lim), yticks=[-VCC, 0, VCC])
             pb.hlines = [(VCC, C_MID, "+V_{CC}", True), (-VCC, C_MID, "−V_{CC}", False)]
@@ -1547,11 +1558,8 @@ class App:
             p.put("fsig", "vline", x=fsig, color=C_VIN)
         self.bm.put("fc_t", "text", x=FC, text="|Aβ| = 1", color=C_MID, anchor="e",
                     dx=-8, dy=16)
-        self.bm.put("fc_d", "dot", x=FC, y=0, color=C_MID)
-        self.bp.put("fc_d", "dot", x=FC, y=-loop_phase(FC, tau), color=C_MID)
-        self.bm.put("f180_d", "dot", x=f180,
-                    y=20 * math.log10(loop_mag(f180)) if f180 else 0, color=C_DIFF)
-        self.bp.put("f180_d", "dot", x=f180, y=-180, color=C_DIFF)
+        # Only the signal frequency gets a dot.  The crossover and 180-deg
+        # lines carry the margins; dots on them made those points look special.
         if fsig:
             self.bm.put("fsig_d", "dot", x=fsig, y=20 * math.log10(loop_mag(fsig)), color=C_VIN)
             self.bp.put("fsig_d", "dot", x=fsig, y=-loop_phase(fsig, tau), color=C_VIN)

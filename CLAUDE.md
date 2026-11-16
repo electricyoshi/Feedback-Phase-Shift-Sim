@@ -22,7 +22,7 @@ paths and personal details.
   sizes. Enforced by `tests/test_parity.py` for everything except layout/drawing.
 - **Testable logic lives in pure module-level functions**, same names in both files
   (`view1_status`/`view1Status`, `view2_status`, `view1_ratio`, `linked_phase`,
-  `time_unit`, `bode_freqs`, formatters). Put new numbers/wording there, not inside
+  `time_unit`, `phase_label`, `bode_freqs`, formatters). Put new numbers/wording there, not inside
   `App.refresh` / `update()`, or the tests can't see them.
 - **View 1 signal frequency is 1 Hz - 300 kHz** so the linked phase reaches 0 deg
   (pole alone is 5.7 deg at 100 Hz). View 1's Bode axis is therefore 1 Hz - 1 MHz
@@ -73,6 +73,11 @@ paths and personal details.
   in one text item, so `draw_rich()` / `draw_runs()` draw runs on canvases; `RichText`
   (read-only tk.Text) is only used for wrapped text in the "?" notes window. Plain-text
   spots (window title, Plot.put() "text" annotations) can't use markup.
+- **Phase slider title differs by view** (`phase_label`): "Phase lag" in view 1 (a lag
+  imposed on the signal), "Feedback Phase Lag" in view 2 (lag of A*B at crossover = a
+  different amplifier). The label block grows and the rail shrinks to fit the longer title.
+- **Bode dots:** only the signal frequency gets a dot. The crossover (grey) and 180 deg
+  (orange) are lines only, on purpose - dots there made those points look special.
 - Loop model and why a pure delay is used for excess phase: see README.md "The model"
   and the constants at the top of `feedback_phase_sim.py`.
 

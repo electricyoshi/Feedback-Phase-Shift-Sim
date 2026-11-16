@@ -131,6 +131,11 @@ class Parity(unittest.TestCase):
             self.assertEqual(g["bg"], color, c)
             self.assertEqual(g["lines"], [text for text, _, _ in lines], c)
 
+    def test_phase_slider_label(self):
+        got = js([fn("phaseLabel", 1), fn("phaseLabel", 2)])
+        self.assertEqual(got, [list(m.phase_label(1)), list(m.phase_label(2))])
+        self.assertEqual(m.phase_label(2)[0], "Feedback Phase Lag")
+
     def test_notes(self):
         notes = js([fn("NOTES")])[0]
         self.assertEqual(len(notes), len(m.NOTES))

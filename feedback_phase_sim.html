@@ -32,7 +32,7 @@
   .row { display: flex; flex: none; }
   #header { align-items: center; gap: 10px; height: 52px; }
   #header button { height: 52px; padding: 0 18px; border-width: 4px; font-size: 22px; }
-  #header #help { width: 52px; padding: 0; font-size: 28px; }
+  #header #help { width: 26px; height: 26px; padding: 0; font-size: 14px; border-width: 2px; }
   #eq { font-size: 28px; white-space: nowrap; margin-right: 6px; }
   #banner {
     flex: 1; min-width: 0; color: #FFFFFF; padding: 6px 18px;
@@ -86,8 +86,8 @@
   </div>
 
   <div id="phasebar" class="row">
-    <div style="width:176px;flex:none;white-space:nowrap">
-      <div style="font-size:26px;line-height:1.1">Phase lag</div>
+    <div style="min-width:176px;flex:none;white-space:nowrap">
+      <div id="phaseTitle" style="font-size:26px;line-height:1.1">Phase lag</div>
       <div id="phaseSub" style="font-size:17px;line-height:1.2"></div>
     </div>
     <div id="track">
@@ -264,6 +264,10 @@ function view1Status(k, phDeg) {
   if (ratio > 1.005) return { bg: C.BAD, lines: [b1, 'Positive feedback — the difference grows'] };
   return { bg: C.MID, lines: [b1, 'Rotated, but not shrunk'] };
 }
+// title and sub-line of the big phase slider (view 2 picks a different amplifier)
+function phaseLabel(mode) {
+  return mode === 1 ? ['Phase lag', 'of feedback signal'] : ['Feedback Phase Lag', 'of Aβ where |Aβ| = 1'];
+}
 function view2Status(phDeg) {             // phDeg = lag of A*B at crossover
   const pm = 180 - phDeg, f180 = freqForPhase(180, tauFor(phDeg)), gm = f180 ? -20 * Math.log10(loopMag(f180)) : null;
   let bg, msg;
@@ -436,12 +440,10 @@ function drawStatic() {
   const magPlot = { ...xb, title: '|Aβ|  (dB)', yr: [-30, 50], yticks: [-20, 0, 20, 40], noX: true,
     hlines: [{ y: 0, color: C.MID }], series: [{ xs: bf, ys: mag, color: C.INK, width: 3.5 }],
     texts: [{ x: FC, dx: -8, dy: 16, text: '|Aβ| = 1', color: C.MID, align: 'right' }],
-    dots: [{ x: FC, y: 0, color: C.MID }, { x: f180, y: f180 ? 20 * Math.log10(loopMag(f180)) : 0, color: C.DIFF },
-           { x: fsig, y: fsig ? 20 * Math.log10(loopMag(fsig)) : 0, color: C.VIN }] };
+    dots: [{ x: fsig, y: fsig ? 20 * Math.log10(loopMag(fsig)) : 0, color: C.VIN }] };
   const phPlot = { ...xb, title: 'Phase of Aβ  (°)', yr: [-360, 0], yticks: [-360, -180, 0], xunit: 'Hz',
     hlines: [{ y: -180, color: C.DIFF }], series: [{ xs: bf, ys: ph, color: C.INK, width: 3.5 }],
-    dots: [{ x: FC, y: -loopPhase(FC, tau), color: C.MID }, { x: f180, y: -180, color: C.DIFF },
-           { x: fsig, y: fsig ? -loopPhase(fsig, tau) : 0, color: C.VIN }] };
+    dots: [{ x: fsig, y: fsig ? -loopPhase(fsig, tau) : 0, color: C.VIN }] };
   if (S.mode === 1) { drawPhasor(); if (S.link) plot(cv.r2, phPlot); }
   else { plot(cv.r1, magPlot); plot(cv.r2, phPlot); }
 }
@@ -533,7 +535,7 @@ function update() {
 
   const alert = m === 1 ? ph >= 180 : ph > 180, ink = alert ? C.DIFF : C.INK;
   const pct = v => ((v - lo) / (hi - lo) * 100) + '%';
-  $('phaseSub').textContent = m === 1 ? 'of feedback signal' : 'of Aβ where |Aβ| = 1';
+  const pl = phaseLabel(m); $('phaseTitle').textContent = pl[0]; $('phaseSub').textContent = pl[1];
   $('phaseVal').textContent = ph.toFixed(0) + '°'; $('phaseVal').style.color = ink;
   $('thumb').style.left = pct(ph); $('thumb').style.borderColor = ink;
   for (const id of ['railHot', 'mark', 'markText']) $(id).style.left = pct(180);
