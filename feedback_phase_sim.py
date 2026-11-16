@@ -24,7 +24,6 @@ import re
 import time
 import tkinter as tk
 import tkinter.font as tkfont
-from tkinter import ttk
 
 # --------------------------------------------------------------------------
 # Loop model:  A(s) = A0 * exp(-s*tau) / (1 + s/wp),  feedback factor BETA.
@@ -139,19 +138,69 @@ class LoopSim:
 
 
 # --------------------------------------------------------------------------
-# Minimal plotting on a tk Canvas
+# Projector look: white background, bold type, thick lines, colour-blind-safe
+# (Okabe-Ito) palette.  V_FB is black AND dashed so it reads without colour.
+#
+# Every size below is in "stage px" on a 1024 x 768 design stage and is
+# multiplied by Z = min(win_w / 1024, win_h / 768) when drawn, so the layout
+# fills whatever 4:3 window (or projector) it gets.  Z already includes the
+# screen DPI because it comes from the window's real pixel size; fonts use
+# negative (pixel) sizes so Tk doesn't scale them by DPI a second time.
 # --------------------------------------------------------------------------
-C_VIN = "#1f6fd0"
-C_FB = "#e07b00"
-C_DIFF = "#d62728"
-C_OUT = "#1a8f3a"
-C_GRID = "#e3e6ea"
-C_AXIS = "#555555"
-C_OFF = "#b8bcc2"
-C_GOOD = "#1a7f37"
-C_BAD = "#c62828"
-BG = "#ffffff"
-S = 1.0             # UI scale (set from screen DPI at startup)
+C_VIN = "#0072B2"
+C_FB = "#111111"
+C_DIFF = "#D55E00"
+C_OUT = "#009E73"
+C_OFF = "#6B7075"       # loop parts that aren't connected (view 1)
+C_GRID = "#D0D4D9"
+C_ZERO = "#777777"
+C_INK = "#111111"       # frames, ticks, titles, wires
+C_GOOD = "#00735C"
+C_BAD = "#B84300"
+C_MID = "#555555"       # neutral banner, |Aβ| = 1 markers, ±V_CC lines
+C_CIRCLE = "#DDF3EC"    # phasor unit-circle fill
+C_PAXIS = "#B0B5BB"     # phasor axes
+BG = "#FFFFFF"
+DASH = (9, 6)
+
+STAGE_W, STAGE_H = 1024, 768
+Z = 1.0                 # stage px -> screen px (see above)
+FAMILY = "Arial"        # replaced by the Tk default if Arial is missing
+
+
+def zs(v):
+    """Stage px -> whole screen px (never 0, so borders don't vanish)."""
+    return max(1, int(round(v * Z)))
+
+
+def zdash(dash):
+    return tuple(zs(d) for d in dash) if dash else None
+
+
+def dashed_line(cv, x0, y0, x1, y1, width, dash, color, tags=()):
+    """A wide dashed straight line.  Tk on Windows draws any dashed line
+    wider than 1 px as dots, but 1-px dashes come out right - so stack 1-px
+    dashed lines side by side (half-pixel steps so diagonals have no gaps)."""
+    ln = math.hypot(x1 - x0, y1 - y0)
+    if ln < 1:
+        return
+    nx, ny = -(y1 - y0) / ln, (x1 - x0) / ln
+    n = max(1, int(round(width * 2)))
+    for i in range(n):
+        d = (i - (n - 1) / 2.0) * 0.5
+        cv.create_line(x0 + nx * d, y0 + ny * d, x1 + nx * d, y1 + ny * d, fill=color,
+                       width=1, dash=dash, capstyle="butt", tags=tags)
+
+
+_fonts = {}             # stage px -> bold Font
+
+
+def bold(px):
+    f = _fonts.get(px)
+    if f is None:
+        f = _fonts[px] = tkfont.Font(family=FAMILY, size=-max(6, round(px * Z)),
+                                     weight="bold")
+    return f
 
 
 def nice_ticks(lo, hi, n=6):
@@ -174,14 +223,26 @@ def fmt_num(v):
     return ("%.3g" % v).replace("-", "−")
 
 
+def fmt_freq(f):
+    if f >= 1e6:
+        return "%gM" % (f / 1e6)
+    if f >= 1e3:
+        return "%gk" % (f / 1e3)
+    return "%g" % f
+
+
+def fmt_hz(f):
+    return fmt_freq(float("%.3g" % f)) + "Hz"
+
+
 # --------------------------------------------------------------------------
 # Subscripts.  UI strings use a tiny markup, "V_{DIFF}", for a subscript.
 # Unicode has no uppercase subscript letters and Tk labels can't mix font
 # sizes, so subscripts are drawn as separate runs in a smaller, lowered font:
-# draw_rich() on canvases, RichText for text in the control panels.
+# draw_rich() on canvases, RichText for wrapped text in the notes window.
 # --------------------------------------------------------------------------
 SUB_RE = re.compile(r"_\{([^}]*)\}")
-_sub_fonts = {}
+_sub_fonts = {}         # str(main font) -> (main font, subscript font)
 
 
 def rich_parts(markup):
@@ -189,21 +250,35 @@ def rich_parts(markup):
     return [(p, i % 2 == 1) for i, p in enumerate(SUB_RE.split(markup)) if p]
 
 
+def _sub_size(font):
+    size = int(round(int(font.cget("size")) * 0.68))   # negative = pixels
+    if abs(size) < 6:
+        size = 6 if size >= 0 else -6
+    return size
+
+
 def sub_font(font):
     key = str(font)
     if key not in _sub_fonts:
         a = font.actual()
-        size = int(round(a["size"] * 0.72))       # negative size = pixels in Tk
-        if abs(size) < 6:
-            size = 6 if size >= 0 else -6
-        _sub_fonts[key] = tkfont.Font(family=a["family"], size=size,
-                                      weight=a["weight"], slant=a["slant"])
-    return _sub_fonts[key]
+        _sub_fonts[key] = (font, tkfont.Font(family=a["family"], size=_sub_size(font),
+                                             weight=a["weight"], slant=a["slant"]))
+    return _sub_fonts[key][1]
+
+
+def rescale_fonts():
+    """Resize every font for the current Z.  Named fonts update in place, so
+    widgets already using them follow; canvases still need a redraw."""
+    for px, f in _fonts.items():
+        f.configure(size=-max(6, round(px * Z)))
+    for main, sub in _sub_fonts.values():
+        sub.configure(size=_sub_size(main))
 
 
 def sub_drop(font):
-    """How far a subscript's baseline sits below the main baseline, px."""
-    return int(round(font.metrics("ascent") * 0.28))
+    """How far a subscript's baseline sits below the main baseline, px
+    (about 0.3 x the font size)."""
+    return int(round(font.metrics("ascent") * 0.33))
 
 
 def rich_width(font, markup):
@@ -228,24 +303,30 @@ def draw_rich(cv, x, y, markup, font, fill, anchor="center", tags=()):
         left += f.measure(text)
 
 
-def fmt_freq(f):
-    if f >= 1e6:
-        return "%gM" % (f / 1e6)
-    if f >= 1e3:
-        return "%gk" % (f / 1e3)
-    return "%g" % f
+def draw_runs(cv, x, y, runs, font, anchor="w", tags=()):
+    """draw_rich() for several differently coloured runs on one line.
+    runs = [(markup, colour), ...]; anchor is "w", "e" or "center"."""
+    w = sum(rich_width(font, m) for m, _ in runs)
+    left = x if anchor == "w" else x - w if anchor == "e" else x - w / 2
+    for m, color in runs:
+        draw_rich(cv, left, y, m, font, color, "w", tags)
+        left += rich_width(font, m)
+    return w
 
 
+# --------------------------------------------------------------------------
+# Minimal plotting on a tk Canvas
+# --------------------------------------------------------------------------
 class Plot:
-    def __init__(self, parent, fonts, title="", xrange=(0, 1), yrange=(-1, 1),
-                 logx=False, xlabel="", yticks=None, xfmt=fmt_num):
-        self.cv = tk.Canvas(parent, bg=BG, highlightthickness=0,
-                            width=int(200 * S), height=int(110 * S))
-        self.f_small, self.f_bold = fonts
-        self.title, self.xlabel = title, xlabel
+    def __init__(self, parent, title="", xrange=(0, 1), yrange=(-1, 1), logx=False,
+                 xunit="", xticks=None, yticks=None, xfmt=fmt_num, show_x=True):
+        # tiny requested size: the grid's weights decide the real size
+        self.cv = tk.Canvas(parent, bg=BG, highlightthickness=0, width=10, height=10)
+        self.title, self.xunit = title, xunit
         self.xr, self.yr = xrange, yrange
-        self.logx, self.yticks, self.xfmt = logx, yticks, xfmt
-        self.hlines = []          # (y, color, dash, text)
+        self.logx, self.xticks, self.yticks = logx, xticks, yticks
+        self.xfmt, self.show_x = xfmt, show_x
+        self.hlines = []          # (y, color, text, text_below_line)
         self.series = {}          # name -> dict
         self.dyn = {}             # name -> (kind, kwargs)
         self.dyn_items = {}
@@ -256,8 +337,8 @@ class Plot:
     # geometry / transforms
     def _geom(self):
         w, h = max(self.cv.winfo_width(), 50), max(self.cv.winfo_height(), 50)
-        self.l, self.r = 50 * S, w - 14 * S
-        self.t, self.b = 26 * S, h - (36 * S if self.xlabel else 22 * S)
+        self.l, self.r = 46 * Z, w - 10 * Z
+        self.t, self.b = 30 * Z, h - (24 if self.show_x else 8) * Z
         x0, x1 = self.xr
         if self.logx:
             x0, x1 = math.log10(x0), math.log10(x1)
@@ -273,23 +354,50 @@ class Plot:
         return min(self.b, max(self.t, self.b - (y - self._y0) * self._ay))
 
     # configuration
-    def set_ranges(self, xrange=None, yrange=None, xlabel=None, title=None):
+    def configure(self, xrange=None, yrange=None, xunit=None, title=None, yticks=None):
         new = (xrange or self.xr, yrange or self.yr,
-               self.xlabel if xlabel is None else xlabel,
-               self.title if title is None else title)
-        if new != (self.xr, self.yr, self.xlabel, self.title):
-            self.xr, self.yr, self.xlabel, self.title = new
+               self.xunit if xunit is None else xunit,
+               self.title if title is None else title,
+               self.yticks if yticks is None else yticks)
+        if new != (self.xr, self.yr, self.xunit, self.title, self.yticks):
+            self.xr, self.yr, self.xunit, self.title, self.yticks = new
             self.redraw()
 
     def add_series(self, name, color, label=None, width=2.0, dash=None):
-        item = self.cv.create_line(-9, -9, -9, -9, fill=color, width=width * S,
-                                   dash=dash)
-        # Tk draws wide polylines very slowly; for animated traces ("fast"
-        # mode) the same thickness is built from a few offset 1-px lines.
-        thin = [self.cv.create_line(-9, -9, -9, -9, fill=color, width=1)
-                for _ in range(max(2, int(round(width * S * 0.7))))]
-        self.series[name] = dict(item=item, thin=thin, color=color, label=label,
-                                 dash=dash, xs=(), ys=(), visible=True)
+        self.series[name] = dict(item=None, thin=[], built=None, color=color,
+                                 label=label, width=width, dash=dash, xs=(), ys=(),
+                                 visible=True)
+
+    def style(self, name, width=None, dash=False, label=None):
+        """Change a series' width / dash / legend label (takes effect on redraw)."""
+        s = self.series[name]
+        if width is not None:
+            s["width"] = width
+        if dash is not False:
+            s["dash"] = dash
+        if label is not None:
+            s["label"] = label
+
+    def _build(self, s):
+        """(Re)create a series' canvas lines for the current width, dash and Z."""
+        cv = self.cv
+        for item in [s["item"]] + s["thin"]:
+            if item is not None:
+                cv.delete(item)
+        dash = zdash(s["dash"])
+        s["item"] = cv.create_line(-9, -9, -9, -9, fill=s["color"], width=s["width"] * Z,
+                                   dash=dash, joinstyle="miter", capstyle="butt")
+        # Tk draws wide polylines very slowly, and wide dashed ones as dots
+        # on Windows; for animated or dashed traces the same thickness is
+        # built from 1-px lines offset both sideways and up/down - one
+        # direction alone goes thin on slopes.
+        n = max(2, int(round(s["width"] * Z)))
+        ds = [i - (n - 1) / 2.0 for i in range(n)]
+        offs = sorted({(d, 0.0) for d in ds} | {(0.0, d) for d in ds})
+        s["thin"] = [cv.create_line(-9, -9, -9, -9, fill=s["color"], width=1, dash=dash)
+                     for _ in offs]
+        s["offs"] = offs
+        s["built"] = (s["width"], s["dash"], Z)
 
     def set_fast(self, fast):
         self.fast = fast
@@ -308,6 +416,8 @@ class Plot:
         self._plot(s)
 
     def _plot(self, s):
+        if s["item"] is None:
+            return
         if not s["visible"] or len(s["xs"]) < 2:
             for item in [s["item"]] + s["thin"]:
                 self.cv.coords(item, -9, -9, -9, -9)
@@ -325,10 +435,18 @@ class Plot:
             q = b - (y - y0) * ay
             add(l if p < l else r if p > r else p)
             add(t if q < t else b if q > b else q)
-        if self.fast:
+        if self.fast or s["dash"]:      # dashed: see dashed_line()
             self.cv.coords(s["item"], -9, -9, -9, -9)
-            for i, item in enumerate(s["thin"]):
-                self.cv.coords(item, *([v + i for v in pts] if i else pts))
+            for item, (ox, oy) in zip(s["thin"], s["offs"]):
+                if ox:
+                    c = pts[:]
+                    c[0::2] = [v + ox for v in pts[0::2]]
+                elif oy:
+                    c = pts[:]
+                    c[1::2] = [v + oy for v in pts[1::2]]
+                else:
+                    c = pts
+                self.cv.coords(item, *c)
         else:
             self.cv.coords(s["item"], *pts)
             for item in s["thin"]:
@@ -342,16 +460,27 @@ class Plot:
     def _place(self, name):
         kind, kw = self.dyn[name]
         cv = self.cv
+        if kind == "vline":     # several items when dashed: redrawn each time
+            tag = "dyn_" + name
+            cv.delete(tag)
+            x = kw.get("x")
+            if x is None or not (self.xr[0] <= x <= self.xr[1]):
+                return
+            p, tags = self.px(x), (tag, "vline")
+            if kw.get("dash"):
+                dashed_line(cv, p, self.t, p, self.b, 3 * Z, zdash(kw["dash"]),
+                            kw["color"], tags)
+            else:
+                cv.create_line(p, self.t, p, self.b, fill=kw["color"], width=3 * Z,
+                               tags=tags)
+            self._restack()
+            return
         item = self.dyn_items.get(name)
         if item is None:
-            if kind == "vline":
-                item = cv.create_line(0, 0, 0, 0, fill=kw["color"], width=1.5 * S,
-                                      dash=kw.get("dash"))
-            elif kind == "dot":
-                item = cv.create_oval(0, 0, 0, 0, fill=kw["color"], outline="white",
-                                      width=1.5 * S)
+            if kind == "dot":
+                item = cv.create_oval(0, 0, 0, 0, outline=BG, tags="dot")
             else:
-                item = cv.create_text(0, 0, font=self.f_small)
+                item = cv.create_text(0, 0, tags="dot")
             self.dyn_items[name] = item
         x = kw.get("x")
         if x is None or not (self.xr[0] <= x <= self.xr[1]):
@@ -359,127 +488,331 @@ class Plot:
             return
         cv.itemconfigure(item, state="normal")
         p = self.px(x)
-        if kind == "vline":
-            cv.coords(item, p, self.t, p, self.b)
-        elif kind == "dot":
-            q, rad = self.py(kw["y"]), 5 * S
+        if kind == "dot":
+            q, rad = self.py(kw["y"]), 8 * Z
             cv.coords(item, p - rad, q - rad, p + rad, q + rad)
+            cv.itemconfigure(item, fill=kw["color"], width=2.5 * Z)
         else:
             q = self.py(kw["y"]) if "y" in kw else self.t
-            cv.coords(item, p + kw.get("dx", 0) * S, q + kw.get("dy", 0) * S)
-            cv.itemconfigure(item, text=kw["text"], fill=kw["color"],
-                             anchor=kw.get("anchor", "nw"))
+            cv.coords(item, p + kw.get("dx", 0) * Z, q + kw.get("dy", 0) * Z)
+            cv.itemconfigure(item, text=kw["text"], fill=kw["color"], font=bold(16),
+                             anchor=kw.get("anchor", "w"))
+
+    def _restack(self):
+        """Back to front: grid/axes, marker lines, traces, frame + labels, dots."""
+        cv = self.cv
+        cv.tag_lower("vline")
+        cv.tag_lower("static")
+        cv.tag_raise("top")
+        cv.tag_raise("dot")
 
     # static decorations
     def redraw(self):
         self._geom()
         cv = self.cv
         cv.delete("static")
+        for s in self.series.values():
+            if s["built"] != (s["width"], s["dash"], Z):
+                self._build(s)
         l, r, t, b = self.l, self.r, self.t, self.b
-        fs = self.f_small
-        if self.logx:
-            d0 = math.floor(math.log10(self.xr[0]) + 1e-9)
-            d1 = math.ceil(math.log10(self.xr[1]) - 1e-9)
-            for d in range(d0, d1 + 1):
-                for m in range(2, 10):
-                    v = m * 10.0 ** d
-                    if self.xr[0] < v < self.xr[1]:
-                        cv.create_line(self.px(v), t, self.px(v), b, fill="#f0f1f3",
-                                       tags="static")
-            xt = [10.0 ** d for d in range(d0, d1 + 1)]
+        st, top = ("static",), ("static", "top")
+        ft = bold(15)
+        if self.xticks:
+            xt = [v for v in self.xticks if self.xr[0] <= v <= self.xr[1]]
         else:
-            xt = nice_ticks(self.xr[0], self.xr[1], 8)
-        for v in xt:
-            if self.xr[0] <= v <= self.xr[1]:
-                p = self.px(v)
-                cv.create_line(p, t, p, b, fill=C_GRID, tags="static")
-                cv.create_text(p, b + 3 * S, text=self.xfmt(v), anchor="n", font=fs,
-                               fill=C_AXIS, tags="static")
+            xt = [v for v in nice_ticks(self.xr[0], self.xr[1], 4)
+                  if self.xr[0] <= v <= self.xr[1]]
+        for i, v in enumerate(xt):
+            p = self.px(v)
+            cv.create_line(p, t, p, b, fill=C_GRID, width=2 * Z, tags=st)
+            if self.show_x:
+                # the unit rides on the last tick label instead of an axis title
+                txt = self.xfmt(v)
+                if i == len(xt) - 1 and self.xunit:
+                    txt += " " + self.xunit
+                tw = ft.measure(txt)
+                cv.create_text(min(r - tw, max(l, p - tw / 2)), b + 14 * Z, text=txt,
+                               anchor="w", font=ft, fill=C_INK, tags=st)
         for v in (self.yticks or nice_ticks(self.yr[0], self.yr[1], 5)):
             q = self.py(v)
-            cv.create_line(l, q, r, q, fill="#b9bec6" if v == 0 else C_GRID,
-                           tags="static")
-            cv.create_text(l - 5 * S, q, text=fmt_num(v), anchor="e", font=fs,
-                           fill=C_AXIS, tags="static")
-        for y, color, dash, text in self.hlines:
+            cv.create_line(l, q, r, q, fill=C_ZERO if v == 0 else C_GRID, width=2 * Z,
+                           tags=st)
+            cv.create_text(l - 6 * Z, q, text=fmt_num(v), anchor="e", font=ft,
+                           fill=C_INK, tags=st)
+        for y, color, text, below in self.hlines:
             q = self.py(y)
-            cv.create_line(l, q, r, q, fill=color, dash=dash, width=1.5 * S,
-                           tags="static")
+            dashed_line(cv, l, q, r, q, 3 * Z, zdash(DASH), color, st)
             if text:
-                draw_rich(cv, l + 5 * S, q - 2 * S, text, fs, color, "sw", "static")
-        cv.create_rectangle(l, t, r, b, outline=C_AXIS, tags="static")
-        draw_rich(cv, l, t - 5 * S, self.title, self.f_bold, "#222", "sw", "static")
-        if self.xlabel:
-            cv.create_text((l + r) / 2, b + 19 * S, text=self.xlabel, anchor="n",
-                           font=fs, fill=C_AXIS, tags="static")
+                # drawn above the traces on a white box: a clipped output
+                # sitting on the rail can't hide its own label
+                fa = bold(16)
+                q += (14 if below else -14) * Z
+                cv.create_rectangle(l + 5 * Z, q - 10 * Z, l + 13 * Z + rich_width(fa, text),
+                                    q + 11 * Z, fill=BG, outline="", tags=top)
+                draw_rich(cv, l + 9 * Z, q, text, fa, color, "w", top)
+        cv.create_rectangle(l, t, r, b, outline=C_INK, width=3 * Z, tags=top)
+        fl = bold(19)
+        draw_rich(cv, l, 14 * Z, self.title, fl, C_INK, "w", st)
         x = r
         for s in reversed(list(self.series.values())):
             if s["visible"] and s["label"]:
-                x -= rich_width(self.f_bold, s["label"])
-                draw_rich(cv, x, t - 5 * S, s["label"], self.f_bold, s["color"],
-                          "sw", "static")
-                x -= 5 * S
-                cv.create_line(x - 20 * S, t - 13 * S, x, t - 13 * S, fill=s["color"],
-                               width=3 * S, dash=s["dash"], tags="static")
-                x -= 34 * S
-        cv.tag_lower("static")
+                x -= rich_width(fl, s["label"])
+                draw_rich(cv, x, 14 * Z, s["label"], fl, s["color"], "w", st)
+                x -= 6 * Z
+                if s["dash"]:
+                    dashed_line(cv, x - 30 * Z, 13 * Z, x, 13 * Z, 5 * Z,
+                                zdash(s["dash"]), s["color"], st)
+                else:
+                    cv.create_line(x - 30 * Z, 13 * Z, x, 13 * Z, fill=s["color"],
+                                   width=5 * Z, capstyle="butt", tags=st)
+                x -= 46 * Z
+        self._restack()
         for s in self.series.values():
             self._plot(s)
         for name in self.dyn:
             self._place(name)
 
 
-class Slider:
-    def __init__(self, parent, text, lo, hi, init, fmt, on_change, step=None,
-                 log=False, bold=None, big=None):
-        self.fmt, self.step, self.log, self.on_change = fmt, step, log, on_change
-        self.lo, self.hi = lo, hi
-        self.frame = ttk.Frame(parent)
-        head = ttk.Frame(self.frame)
-        head.pack(fill="x")
-        self.label = RichText(head, big or tkfont.nametofont("TkDefaultFont"), text)
-        self.label.pack(side="left")
-        self.value = tk.Label(head, font=big or bold, bg=parent_bg(parent))
-        self.value.pack(side="right")
-        self.var = tk.DoubleVar()
-        self.scale = ttk.Scale(self.frame, from_=self._pos(lo), to=self._pos(hi),
-                               variable=self.var, command=self._moved, takefocus=0)
-        self.scale.pack(fill="x", pady=(1, 0))
+# --------------------------------------------------------------------------
+# Flat controls drawn on canvases.  ttk widgets are too small to see or grab
+# on a projector, and on Windows they can't take a solid fill or a 4 px black
+# border; canvases give square corners and the same look on every OS.
+# --------------------------------------------------------------------------
+class ButtonBar:
+    """A row of flat buttons on one canvas.  gap < 0 makes them share borders
+    (a segmented control).  on_click(index)."""
+
+    def __init__(self, parent, labels, on_click, size=17, height=40, border=3,
+                 padx=12, gap=8, width=None):
+        self.cv = tk.Canvas(parent, bg=BG, highlightthickness=0, cursor="hand2",
+                            width=1, height=1)
+        self.labels, self.on_click = list(labels), on_click
+        self.size, self.height, self.border = size, height, border
+        self.padx, self.gap, self.width = padx, gap, width
+        self.active = None
+        self.cells = []
+        self.cv.bind("<Button-1>", self._click)
+        self.rescale()
+
+    def set_active(self, i):
+        if i != self.active:
+            self.active = i
+            self.draw()
+
+    def set_label(self, i, text):
+        self.labels[i] = text
+        self.rescale()
+
+    def rescale(self):
+        f = bold(self.size)
+        widths = [self.width * Z if self.width else rich_width(f, s) + 2 * self.padx * Z
+                  for s in self.labels]
+        x, self.cells = 0.0, []
+        for w in widths:
+            self.cells.append((x, x + w))
+            x += w + self.gap * Z
+        self.cv.configure(width=int(round(x - self.gap * Z)), height=zs(self.height))
+        self.draw()
+
+    def draw(self):
+        cv = self.cv
+        cv.delete("all")
+        f, bw, h = bold(self.size), zs(self.border), zs(self.height)
+        for i, ((x0, x1), text) in enumerate(zip(self.cells, self.labels)):
+            on = i == self.active
+            cv.create_rectangle(x0 + bw / 2, bw / 2, x1 - bw / 2, h - bw / 2, width=bw,
+                                outline=C_INK, fill=C_INK if on else BG)
+            draw_rich(cv, (x0 + x1) / 2, h / 2, text, f, BG if on else C_INK)
+
+    def _click(self, e):
+        for i, (x0, x1) in enumerate(self.cells):
+            if x0 <= e.x <= x1:
+                self.on_click(i)
+                return
+
+
+class CheckBox:
+    def __init__(self, parent, text, var, command):
+        self.cv = tk.Canvas(parent, bg=BG, highlightthickness=0, cursor="hand2",
+                            width=1, height=1)
+        self.text, self.var, self.command = text, var, command
+        self.cv.bind("<Button-1>", self._click)
+        self.rescale()
+
+    def rescale(self):
+        self.cv.configure(width=zs(34) + int(rich_width(bold(17), self.text)) + 2,
+                          height=zs(40))
+        self.draw()
+
+    def draw(self):
+        cv = self.cv
+        cv.delete("all")
+        h, s, bw = zs(40), 26 * Z, zs(3)
+        y0 = (h - s) / 2
+        on = self.var.get()
+        cv.create_rectangle(bw / 2, y0 + bw / 2, s - bw / 2, y0 + s - bw / 2, width=bw,
+                            outline=C_INK, fill=C_INK if on else BG)
+        if on:
+            cv.create_line(6 * Z, y0 + 13 * Z, 11 * Z, y0 + 19 * Z, 20 * Z, y0 + 7 * Z,
+                           fill=BG, width=4 * Z, joinstyle="miter", capstyle="butt")
+        draw_rich(cv, 34 * Z, h / 2, self.text, bold(17), C_INK, "w")
+
+    def _click(self, e):
+        self.var.set(not self.var.get())
+        self.draw()
+        self.command()
+
+
+class _Track:
+    """Value logic shared by the sliders: linear or log, optional step,
+    click or drag anywhere along the rail."""
+    H = 40
+
+    def __init__(self, parent, lo, hi, init, on_change, step=None, log=False):
+        self.cv = tk.Canvas(parent, bg=BG, highlightthickness=0, cursor="hand2",
+                            width=1, height=1)
+        self.lo, self.hi, self.step, self.log = lo, hi, step, log
+        self.on_change = on_change
+        self.cv.configure(height=zs(self.H))
+        self.pos = self._p(lo)
+        self._dragging = False
+        self.cv.bind("<Configure>", lambda e: self.draw())
+        self.cv.bind("<ButtonPress-1>", self._press)
+        self.cv.bind("<B1-Motion>", self._motion)
+        self.cv.bind("<ButtonRelease-1>", self._release)
         self.set(init)
 
-    def _pos(self, v):
+    def _p(self, v):
         return math.log10(v) if self.log else v
 
     def get(self):
-        v = self.var.get()
-        v = 10 ** v if self.log else v
+        v = 10 ** self.pos if self.log else self.pos
         if self.step:
             v = round(v / self.step) * self.step
         return min(self.hi, max(self.lo, v))
 
     def set(self, v):
-        self.var.set(self._pos(min(self.hi, max(self.lo, v))))
-        self._show()
+        self.pos = self._p(min(self.hi, max(self.lo, v)))
+        self.draw()
 
-    def set_range(self, lo, hi, text=None):
+    def set_range(self, lo, hi):
         self.lo, self.hi = lo, hi
-        self.scale.configure(from_=self._pos(lo), to=self._pos(hi))
-        if text:
-            self.label.set(text)
+        self.set(self.get())
 
-    def _show(self):
-        self.value.configure(text=self.fmt(self.get()))
+    def frac(self, v=None):
+        p0, p1 = self._p(self.lo), self._p(self.hi)
+        return (self._p(self.get() if v is None else v) - p0) / (p1 - p0)
 
-    def _moved(self, _):
-        self._show()
+    def rail(self):
+        raise NotImplementedError
+
+    def rescale(self):
+        self.cv.configure(height=zs(self.H))
+        self.draw()
+
+    def draw(self):
+        raise NotImplementedError
+
+    def _press(self, e):
+        x0, x1 = self.rail()
+        self._dragging = x0 - 24 * Z <= e.x <= x1 + 24 * Z
+        self._motion(e)
+
+    def _release(self, e):
+        self._dragging = False
+
+    def _motion(self, e):
+        if not self._dragging:
+            return
+        x0, x1 = self.rail()
+        f = min(1.0, max(0.0, (e.x - x0) / max(1.0, x1 - x0)))
+        p0, p1 = self._p(self.lo), self._p(self.hi)
+        self.pos = p0 + f * (p1 - p0)
+        self.pos = self._p(self.get())          # snap the thumb to the step
+        self.draw()
         self.on_change()
+
+
+class Slider(_Track):
+    """Footer slider: label left, value right, flat rail underneath."""
+    H = 44
+
+    def __init__(self, parent, text, lo, hi, init, fmt, on_change, step=None, log=False):
+        self.text, self.fmt = text, fmt
+        super().__init__(parent, lo, hi, init, on_change, step, log)
+
+    def rail(self):
+        return 11 * Z, self.cv.winfo_width() - 11 * Z
+
+    def draw(self):
+        cv = self.cv
+        w = cv.winfo_width()
+        cv.delete("all")
+        if w < 30:
+            return
+        f = bold(17)
+        draw_rich(cv, 0, 11 * Z, self.text, f, C_INK, "w")
+        draw_rich(cv, w, 11 * Z, self.fmt(self.get()), f, C_INK, "e")
+        x0, x1 = self.rail()
+        y = 32 * Z
+        cv.create_rectangle(x0, y - 2 * Z, x1, y + 2 * Z, fill=C_INK, outline="")
+        x, r, bw = x0 + self.frac() * (x1 - x0), 10 * Z, 3 * Z
+        cv.create_oval(x - r + bw / 2, y - r + bw / 2, x + r - bw / 2, y + r - bw / 2,
+                       fill=BG, outline=C_INK, width=bw)
+
+
+class PhaseBar(_Track):
+    """The big phase-lag slider: 'Phase lag' + sub-line, a thick rail that
+    turns orange past 180 deg, and a large readout.  One canvas, 76 stage px."""
+    H = 76
+
+    def __init__(self, parent, lo, hi, init, on_change):
+        self.sub, self.alert = "", False
+        super().__init__(parent, lo, hi, init, on_change, step=1.0)
+
+    def rail(self):
+        # border 4 + pad 16 + label block 176 + gap 16 + thumb room 22 = 234;
+        # right side the same with the 128-wide readout
+        return 234 * Z, self.cv.winfo_width() - 186 * Z
+
+    def set_sub(self, text):
+        self.sub = text
+        self.draw()
+
+    def set_alert(self, on):
+        if on != self.alert:
+            self.alert = on
+            self.draw()
+
+    def draw(self):
+        cv = self.cv
+        w, h = cv.winfo_width(), zs(self.H)
+        cv.delete("all")
+        if w < 300:
+            return
+        ink = C_DIFF if self.alert else C_INK
+        bw = zs(4)
+        cv.create_rectangle(bw / 2, bw / 2, w - bw / 2, h - bw / 2, width=bw, outline=C_INK)
+        draw_rich(cv, 20 * Z, 28 * Z, "Phase lag", bold(26), C_INK, "w")
+        draw_rich(cv, 20 * Z, 52 * Z, self.sub, bold(17), C_INK, "w")
+        x0, x1 = self.rail()
+        xm = x0 + self.frac(180.0) * (x1 - x0)
+        cv.create_rectangle(x0, 24 * Z, x1, 36 * Z, fill=C_INK, outline="")
+        cv.create_rectangle(xm, 24 * Z, x1, 36 * Z, fill=C_DIFF, outline="")
+        cv.create_rectangle(xm - 2 * Z, 12 * Z, xm + 2 * Z, 48 * Z, fill=C_DIFF, outline="")
+        cv.create_text(xm, 60 * Z, text="180°", font=bold(17), fill=C_DIFF)
+        x, r, rw = x0 + self.frac() * (x1 - x0), 22 * Z, 7 * Z
+        cv.create_oval(x - r + rw / 2, 30 * Z - r + rw / 2, x + r - rw / 2,
+                       30 * Z + r - rw / 2, fill=BG, outline=ink, width=rw)
+        cv.create_text(w - 20 * Z, 38 * Z, text="%.0f°" % self.get(), anchor="e",
+                       font=bold(56), fill=ink)
 
 
 def parent_bg(widget):
     try:
-        return ttk.Style().lookup("TFrame", "background") or widget.winfo_toplevel().cget("bg")
+        return widget.cget("background")
     except tk.TclError:
-        return "#f0f0f0"
+        return BG
 
 
 class RichText(tk.Frame):
@@ -493,7 +826,7 @@ class RichText(tk.Frame):
     N pixels wide.  wrap_px=0: word-wrapped to whatever width it is packed to.
     """
 
-    def __init__(self, parent, font, markup="", fg="#000", wrap_px=None):
+    def __init__(self, parent, font, markup="", fg=C_INK, wrap_px=None):
         bg = parent_bg(parent)
         super().__init__(parent, bg=bg, width=max(1, wrap_px or 1), height=1)
         self.pack_propagate(False)
@@ -537,22 +870,8 @@ class RichText(tk.Frame):
 # --------------------------------------------------------------------------
 # Application
 # --------------------------------------------------------------------------
-HELP1 = ("The feedback signal here is just a copy of V_{IN} with its own size and "
-         "phase lag - no loop yet.\n\n"
-         "• 0°: it subtracts, so V_{DIFF} is small.\n"
-         "• Toward 180°: it cancels less and less.\n"
-         "• At 180°: the subtraction has become an addition.\n\n"
-         "In the phasor view, any time the tip of V_{DIFF} is outside the dashed "
-         "circle, feedback has made V_{DIFF} bigger than V_{IN}.")
-HELP2 = ("Now V_{DIFF} drives amplifier A (gain 200, ±5 V rails) and "
-         "β = 0.5 feeds the output back.\n\n"
-         "The slider sets the phase lag of Aβ at the frequency where "
-         "|Aβ| = 1.\n\n"
-         "• Use a square wave to see ringing grow as you approach 180°.\n"
-         "• Go past 180° and wait.\n"
-         "• Set V_{IN} to 0: it oscillates on its own.")
-
-# Notes behind the "?" button: (heading, body) pairs.
+# Notes behind the "?" button: (heading, body) pairs.  Instructor-facing; the
+# main window keeps text to a minimum so it reads from the back of the room.
 NOTES = (
     ("The phase slider means something different in each view",
      "• View 1: the lag of the feedback signal relative to V_{IN}.\n"
@@ -567,28 +886,25 @@ NOTES = (
      "\"Link phase to frequency\" ties only the phase to the Bode plot. The "
      "amplitude of the feedback signal stays wherever the Feedback size "
      "slider puts it."),
+    ("Keys",
+     "• ← / →  nudge the phase 1°  (Shift: 10°)\n"
+     "• Space  pause / run\n"
+     "• F11  full screen    Esc  leave full screen"),
 )
 
 
 class App:
     SWEEP_S = 6.0     # real seconds for one screen-width of simulated time
 
-    def __init__(self, root):
-        global S
+    def __init__(self, root, z0=1.0):
+        global Z, FAMILY
+        Z = z0
         self.root = root
         # The OS title bar is plain text (no subscripts), so no equation here.
         root.title("Feedback & Phase Shift")
-        S = max(1.0, root.winfo_fpixels("1i") / 96.0)
-        base = tkfont.nametofont("TkDefaultFont")
-        fam = base.actual("family")
-        base.configure(size=11)
-        self.f_small = tkfont.Font(family=fam, size=10)
-        self.f_bold = tkfont.Font(family=fam, size=11, weight="bold")
-        self.f_big = tkfont.Font(family=fam, size=14, weight="bold")
-        self.f_huge = tkfont.Font(family=fam, size=17, weight="bold")
-        fonts = (self.f_small, self.f_bold)
-        self.bg = parent_bg(root)
-        root.configure(bg=self.bg)
+        if "Arial" not in tkfont.families(root):
+            FAMILY = tkfont.nametofont("TkDefaultFont").actual("family")
+        root.configure(bg=BG)
 
         self.mode = tk.IntVar(value=1)
         self.link = tk.BooleanVar(value=False)
@@ -601,221 +917,303 @@ class App:
         self.last = time.perf_counter()
         self.carry = 0.0
         self.span2 = None
+        self.banner_state = (C_MID, [])
+        self.help_win = None
+        self._rescale_pending = False
 
-        root.columnconfigure(1, weight=3)
-        root.columnconfigure(2, weight=2)
-        root.rowconfigure(2, weight=1)
+        main = self.main = tk.Frame(root, bg=BG)
+        main.pack(fill="both", expand=True)
+        main.columnconfigure(0, weight=1)
+        main.rowconfigure(3, weight=1)
 
-        # ---- left: controls -------------------------------------------------
-        cp = ttk.Frame(root, padding=(12, 10))
-        cp.grid(row=0, column=0, rowspan=3, sticky="ns")
-        wrap = int(270 * S)
-        ttk.Label(cp, text="View", font=self.f_bold).pack(anchor="w")
-        for val, txt in ((1, "1 · Summing junction only"),
-                         (2, "2 · Full closed loop")):
-            ttk.Radiobutton(cp, text=txt, variable=self.mode, value=val,
-                            command=self.set_mode).pack(anchor="w", pady=1)
-        ttk.Separator(cp).pack(fill="x", pady=8)
+        # ---- header: view tabs, equation, "?" -------------------------------
+        header = tk.Frame(main, bg=BG)
+        header.grid(row=0, column=0, sticky="ew")
+        self.tabs = ButtonBar(header, ["1 · Summing junction", "2 · Closed loop"],
+                              self.tab_clicked, size=22, height=52, border=4,
+                              padx=18, gap=10)
+        self.tabs.cv.pack(side="left")
+        self.help_btn = ButtonBar(header, ["?"], lambda i: self.toggle_help(),
+                                  size=28, height=52, border=4, width=52)
+        self.help_btn.cv.pack(side="right")
+        self.eq = tk.Canvas(header, bg=BG, highlightthickness=0, width=1, height=1)
+        self.eq.pack(side="right")
 
-        ch = self.changed
-        self.f1 = ttk.Frame(cp)
-        self.s_k = Slider(self.f1, "Feedback size  |V_{FB}| / |V_{IN}|", 0.0, 1.5, 0.9,
-                          lambda v: "%.2f" % v, ch, step=0.01, bold=self.f_bold)
-        self.s_k.frame.pack(fill="x", pady=4)
-        ttk.Checkbutton(self.f1, text="Link phase to frequency\n(follow the Bode plot)",
-                        variable=self.link, command=self.link_toggled).pack(anchor="w", pady=(8, 2))
-        self.s_f1 = Slider(self.f1, "Signal frequency", 100.0, 3e5, 1e3,
-                           lambda v: fmt_freq(float("%.3g" % v)) + "Hz", self.freq1_changed,
-                           log=True, bold=self.f_bold)
-        self.s_f1.frame.pack(fill="x", pady=4)
-        RichText(self.f1, self.f_small, HELP1, wrap_px=wrap).pack(anchor="w", pady=(12, 0))
-
-        self.f2 = ttk.Frame(cp)
-        row = ttk.Frame(self.f2)
-        row.pack(fill="x")
-        ttk.Label(row, text="Input:").pack(side="left")
-        for val in ("sine", "square"):
-            ttk.Radiobutton(row, text=val, variable=self.shape, value=val).pack(side="left", padx=4)
-        self.s_amp = Slider(self.f2, "V_{IN} amplitude", 0.0, 3.0, 1.0,
-                            lambda v: "%.1f V" % v, ch, step=0.1, bold=self.f_bold)
-        self.s_amp.frame.pack(fill="x", pady=4)
-        self.s_f2 = Slider(self.f2, "V_{IN} frequency", 1e3, 1e5, 5e3,
-                           lambda v: fmt_freq(float("%.3g" % v)) + "Hz", ch,
-                           log=True, bold=self.f_bold)
-        self.s_f2.frame.pack(fill="x", pady=4)
-        self.s_speed = Slider(self.f2, "Playback speed", 0.25, 4.0, 1.0,
-                              lambda v: "%.2g×" % v, ch, log=True, bold=self.f_bold)
-        self.s_speed.frame.pack(fill="x", pady=4)
-        row = ttk.Frame(self.f2)
-        row.pack(fill="x", pady=(6, 0))
-        self.b_pause = ttk.Button(row, text="Pause", command=self.toggle_pause)
-        self.b_pause.pack(side="left", expand=True, fill="x", padx=(0, 3))
-        ttk.Button(row, text="Restart", command=self.restart).pack(
-            side="left", expand=True, fill="x", padx=(3, 0))
-        RichText(self.f2, self.f_small, HELP2, wrap_px=wrap).pack(anchor="w", pady=(12, 0))
-
-        ttk.Label(cp, text="← →  nudge phase 1°  (Shift: 10°)\nSpace  pause / run",
-                  font=self.f_small, foreground="#666").pack(side="bottom", anchor="w")
-
-        # ---- top: block diagram + readout ----------------------------------
-        top = ttk.Frame(root, padding=(4, 8, int(40 * S), 0))   # room for "?"
-        top.grid(row=0, column=1, columnspan=2, sticky="ew")
-        self.diagram = tk.Canvas(top, width=int(400 * S), height=int(154 * S),
-                                 bg=self.bg, highlightthickness=0)
+        # ---- block diagram + status banner -----------------------------------
+        self.mid = tk.Frame(main, bg=BG)
+        self.mid.grid(row=1, column=0, sticky="ew")
+        self.diagram = tk.Canvas(self.mid, bg=BG, highlightthickness=0)
         self.diagram.pack(side="left")
-        info = tk.Frame(top, bg=self.bg)
-        info.pack(side="left", fill="both", expand=True, padx=(10, 0))
-        self.l_line1 = RichText(info, self.f_huge, wrap_px=0)
-        self.l_line1.pack(fill="x", pady=(14, 2))
-        self.l_line2 = RichText(info, self.f_big, wrap_px=0)
-        self.l_line2.pack(fill="x")
+        self.banner = tk.Canvas(self.mid, bg=BG, highlightthickness=0, width=1)
+        self.banner.pack(side="left", fill="x", expand=True)
+        self.banner.bind("<Configure>", lambda e: self.draw_banner())
 
-        # ---- the phase slider ----------------------------------------------
-        pf = ttk.Frame(root, padding=(14, 2, 14, 6))
-        pf.grid(row=1, column=1, columnspan=2, sticky="ew")
-        self.s_phase = Slider(pf, "", 0.0, 360.0, 0.0, lambda v: "%.0f°" % v,
-                              self.phase_changed, step=1.0, big=self.f_big)
-        self.s_phase.frame.pack(fill="x")
+        # ---- the phase slider ------------------------------------------------
+        self.s_phase = PhaseBar(main, 0.0, 360.0, 0.0, self.phase_changed)
+        self.s_phase.cv.grid(row=2, column=0, sticky="ew")
 
-        # ---- middle: time-domain plots -------------------------------------
-        mid = ttk.Frame(root, padding=(4, 0, 0, 6))
-        mid.grid(row=2, column=1, sticky="nsew")
-        self.pa = Plot(mid, fonts, xlabel="time")
-        self.pb = Plot(mid, fonts, xlabel="time")
-        self.pa.cv.pack(fill="both", expand=True)
-        self.pb.cv.pack(fill="both", expand=True)
-        self.pa.add_series("vin", C_VIN, "V_{IN}", 2.5)
-        self.pa.add_series("vfb", C_FB, "V_{FB}", 2.5)
-        self.pa.add_series("vd", C_DIFF, "V_{DIFF}", 2.0)
-        self.pb.add_series("vin", "#8db6ea", "V_{IN}", 1.5)
-        self.pb.add_series("vd", C_DIFF, "V_{DIFF}", 3.0)
-        self.pb.add_series("vout", C_OUT, "V_{OUT}", 2.5)
+        # ---- plots: time domain left; phasor / Bode right --------------------
+        plots = self.plots = tk.Frame(main, bg=BG)
+        plots.grid(row=3, column=0, sticky="nsew")
+        plots.rowconfigure(0, weight=1)
+        plots.columnconfigure(0, weight=582, uniform="col")
+        plots.columnconfigure(1, weight=410, uniform="col")
+        left = self.left = tk.Frame(plots, bg=BG, width=1, height=1)
+        left.grid(row=0, column=0, sticky="nsew")
+        left.columnconfigure(0, weight=1)
+        left.rowconfigure(0, weight=1, uniform="row")
+        left.rowconfigure(1, weight=1, uniform="row")
+        self.pa = Plot(left)
+        self.pb = Plot(left)
+        self.pa.cv.grid(row=0, column=0, sticky="nsew")
+        self.pb.cv.grid(row=1, column=0, sticky="nsew")
+        self.pa.add_series("vin", C_VIN, "V_{IN}")
+        self.pa.add_series("vfb", C_FB, "V_{FB}")
+        self.pa.add_series("vd", C_DIFF, "V_{DIFF}")
+        self.pb.add_series("vin", C_VIN, "V_{IN}")
+        self.pb.add_series("vd", C_DIFF, "V_{DIFF}")
+        self.pb.add_series("vout", C_OUT, "V_{OUT}")
 
-        # ---- right: phasor + Bode ------------------------------------------
-        right = ttk.Frame(root, padding=(0, 0, 6, 6))
-        right.grid(row=2, column=2, sticky="nsew")
+        right = self.right = tk.Frame(plots, bg=BG, width=1, height=1)
+        right.grid(row=0, column=1, sticky="nsew")
         right.columnconfigure(0, weight=1)
-        right.rowconfigure(0, weight=7)
-        self.right = right
-        right.rowconfigure(1, weight=3)
-        right.rowconfigure(2, weight=3)
-        self.phasor = tk.Canvas(right, bg=BG, highlightthickness=0,
-                                width=int(260 * S), height=int(150 * S))
-        self.phasor.grid(row=0, column=0, sticky="nsew")
+        self.phasor = tk.Canvas(right, bg=BG, highlightthickness=0, width=10, height=10)
         self.phasor.bind("<Configure>", lambda e: self.draw_phasor())
-        self.bm = Plot(right, fonts, title="Loop gain |Aβ|  (dB)", xrange=(100, 1e6),
-                       yrange=(-30, 50), logx=True, xfmt=fmt_freq,
-                       yticks=[-20, 0, 20, 40])
-        self.bp = Plot(right, fonts, title="Phase of Aβ  (deg)", xrange=(100, 1e6),
-                       yrange=(-360, 0), logx=True, xfmt=fmt_freq, xlabel="frequency (Hz)",
-                       yticks=[-360, -270, -180, -90, 0])
-        self.bm.cv.grid(row=1, column=0, sticky="nsew")
-        self.bp.cv.grid(row=2, column=0, sticky="nsew")
-        self.bm.hlines = [(0, "#888", (4, 3), "")]
-        self.bp.hlines = [(-180, C_BAD, (4, 3), "")]
-        self.bm.add_series("mag", "#00a3d9", width=2.5)
-        self.bp.add_series("ph", "#00a3d9", width=2.5)
+        bode = dict(xrange=(100, 1e6), logx=True, xfmt=fmt_freq,
+                    xticks=[100, 1e3, 1e4, 1e5, 1e6])
+        self.bm = Plot(right, title="|Aβ|  (dB)", yrange=(-30, 50),
+                       yticks=[-20, 0, 20, 40], show_x=False, **bode)
+        self.bp = Plot(right, title="Phase of Aβ  (°)", yrange=(-360, 0), xunit="Hz",
+                       yticks=[-360, -180, 0], **bode)
+        self.bm.hlines = [(0, C_MID, "", False)]
+        self.bp.hlines = [(-180, C_DIFF, "", False)]
+        self.bm.add_series("mag", C_INK, width=3.5)
+        self.bp.add_series("ph", C_INK, width=3.5)
         self.bode_f = [10 ** (2 + 4 * i / 240.0) for i in range(241)]
         self.bm.set_data("mag", self.bode_f, [20 * math.log10(loop_mag(f)) for f in self.bode_f])
 
+        # ---- footer: per-view controls ---------------------------------------
+        footer = tk.Frame(main, bg=BG)
+        footer.grid(row=4, column=0, sticky="ew")
+        self.footer_line = tk.Frame(footer, bg=C_INK, height=4)
+        self.footer_line.pack(fill="x")
+        self.footer_row = tk.Frame(footer, bg=BG)
+        self.footer_row.pack(fill="x")
+        ch = self.changed
+
+        self.f1 = tk.Frame(self.footer_row, bg=BG)
+        self.s_k = Slider(self.f1, "Feedback size", 0.0, 1.5, 0.9,
+                          lambda v: "%.2f" % v, ch, step=0.01)
+        self.cb_link = CheckBox(self.f1, "Link phase to frequency", self.link,
+                                self.link_toggled)
+        self.s_f1 = Slider(self.f1, "Signal frequency", 100.0, 3e5, 1e3, fmt_hz,
+                           self.freq1_changed, log=True)
+
+        self.f2 = tk.Frame(self.footer_row, bg=BG)
+        self.seg_shape = ButtonBar(self.f2, ["Sine", "Square"], self.shape_clicked,
+                                   gap=-3)
+        self.seg_shape.set_active(0)
+        self.s_amp = Slider(self.f2, "V_{IN} amplitude", 0.0, 3.0, 1.0,
+                            lambda v: "%.1f V" % v, ch, step=0.1)
+        self.s_f2 = Slider(self.f2, "V_{IN} frequency", 1e3, 1e5, 5e3, fmt_hz, ch,
+                           log=True)
+        self.s_speed = Slider(self.f2, "Speed", 0.25, 4.0, 1.0,
+                              lambda v: "%.2g×" % v, ch, log=True)
+        self.run_btns = ButtonBar(self.f2, ["Pause", "Restart"], self.run_clicked,
+                                  width=86)
+
+        # (widget, stretches?) in footer order; gaps are set in _layout()
+        self.footer_items = []
+        for frame, items in ((self.f1, (self.s_k, self.cb_link, self.s_f1)),
+                             (self.f2, (self.seg_shape, self.s_amp, self.s_f2,
+                                        self.s_speed, self.run_btns))):
+            for i, w in enumerate(items):
+                grow = isinstance(w, Slider)
+                w.cv.pack(side="left", fill="x" if grow else None, expand=grow)
+                if i:
+                    self.footer_items.append(w.cv)
+        self.scalables = [self.tabs, self.help_btn, self.s_phase, self.s_k, self.cb_link,
+                          self.s_f1, self.seg_shape, self.s_amp, self.s_f2, self.s_speed,
+                          self.run_btns]
+
         # ---- keys -----------------------------------------------------------
-        for seq in ("<Left>", "<Right>", "<Up>", "<Down>"):
-            root.unbind_class("TScale", seq)
         root.bind_all("<Left>", lambda e: self.nudge(-1))
         root.bind_all("<Right>", lambda e: self.nudge(1))
         root.bind_all("<Shift-Left>", lambda e: self.nudge(-10))
         root.bind_all("<Shift-Right>", lambda e: self.nudge(10))
         root.bind_all("<space>", lambda e: self.toggle_pause())
-        root.unbind_class("TButton", "<space>")
-        root.unbind_class("TRadiobutton", "<space>")
-        root.unbind_class("TCheckbutton", "<space>")
+        root.bind("<F11>", lambda e: self.set_fullscreen(None))
+        root.bind("<Escape>", lambda e: self.set_fullscreen(False))
+        root.bind("<Configure>", self._on_configure)
 
-        # ---- help button (upper right corner) -------------------------------
-        self.help_win = None
-        d = int(24 * S)
-        hb = tk.Canvas(root, width=d, height=d, bg=self.bg, highlightthickness=0,
-                       cursor="hand2")
-        circ = hb.create_oval(1, 1, d - 1, d - 1, fill="#d4d7dc", outline="#a9aeb5")
-        hb.create_text(d / 2, d / 2, text="?", fill="#555",
-                       font=tkfont.Font(family=fam, size=11, weight="bold"))
-        hb.bind("<Enter>", lambda e: hb.itemconfigure(circ, fill="#bfc3c9"))
-        hb.bind("<Leave>", lambda e: hb.itemconfigure(circ, fill="#d4d7dc"))
-        hb.bind("<Button-1>", lambda e: self.toggle_help())
-        hb.place(relx=1.0, x=-int(10 * S), y=int(8 * S), anchor="ne")
-        tk.Misc.tkraise(hb)     # Canvas.lift() means raise an item, not the widget
-
+        self._layout()
+        self.draw_eq()
         self.set_mode()
         self.tick()
+
+    # ---- scaling ---------------------------------------------------------------
+    def _layout(self):
+        """Paddings and fixed sizes that depend on Z."""
+        self.main.configure(padx=zs(12), pady=zs(12))
+        self.eq.pack_configure(padx=(0, zs(16)))
+        self.mid.grid_configure(pady=(zs(8), 0))
+        self.diagram.configure(width=zs(292), height=zs(112))
+        self.banner.configure(height=zs(112))
+        self.banner.pack_configure(padx=(zs(8), 0))
+        self.s_phase.cv.grid_configure(pady=(zs(8), 0))
+        self.plots.grid_configure(pady=zs(8))
+        self.left.grid_configure(padx=(0, zs(8)))
+        self.pb.cv.grid_configure(pady=(zs(6), 0))
+        self.footer_line.configure(height=zs(4))
+        self.footer_row.pack_configure(pady=(zs(6), 0))
+        for w in self.footer_items:
+            w.pack_configure(padx=(zs(22), 0))
+        self.arrange_right()
+
+    def _on_configure(self, e):
+        if e.widget is not self.root or self._rescale_pending:
+            return
+        z = max(0.4, min(e.width / STAGE_W, e.height / STAGE_H))
+        if abs(z - Z) > 0.005 * Z:
+            # debounce: a window drag sends a stream of these
+            self._rescale_pending = True
+            self.root.after(80, self._rescale)
+
+    def _rescale(self):
+        global Z
+        self._rescale_pending = False
+        r = self.root
+        z = max(0.4, min(r.winfo_width() / STAGE_W, r.winfo_height() / STAGE_H))
+        if abs(z - Z) <= 0.005 * Z:
+            return
+        Z = z
+        rescale_fonts()
+        for w in self.scalables:
+            w.rescale()
+        self._layout()
+        for p in (self.pa, self.pb, self.bm, self.bp):
+            p.redraw()
+        self.draw_eq()
+        self.draw_diagram()
+        self.dirty = True
+
+    def set_fullscreen(self, on):
+        r = self.root
+        if on is None:
+            on = not r.tk.getboolean(r.attributes("-fullscreen"))
+        r.attributes("-fullscreen", bool(on))
 
     # ---- help notes -----------------------------------------------------------
     def toggle_help(self):
         if self.help_win is not None and self.help_win.winfo_exists():
             self.close_help()
             return
-        win = tk.Toplevel(self.root)
+        win = tk.Toplevel(self.root, bg=BG)
         self.help_win = win
         win.title("Notes")
         win.transient(self.root)
         win.resizable(False, False)
-        win.configure(bg=self.bg)
-        body = ttk.Frame(win, padding=(16, 12, 16, 14))
+        body = tk.Frame(win, bg=BG, padx=zs(20), pady=zs(16))
         body.pack(fill="both", expand=True)
-        wrap = int(420 * S)
+        wrap = zs(620)
         for i, (head, text) in enumerate(NOTES):
-            ttk.Label(body, text=head, font=self.f_bold).pack(
-                anchor="w", pady=(0 if i == 0 else 12, 3))
-            RichText(body, tkfont.nametofont("TkDefaultFont"), text,
-                     wrap_px=wrap).pack(anchor="w")
-        ttk.Button(body, text="Close", command=self.close_help).pack(
-            anchor="e", pady=(14, 0))
+            RichText(body, bold(20), head, wrap_px=wrap).pack(
+                anchor="w", pady=(0 if i == 0 else zs(14), zs(4)))
+            RichText(body, bold(17), text, fg=C_MID, wrap_px=wrap).pack(anchor="w")
+        close = ButtonBar(body, ["Close"], lambda i: self.close_help(), padx=16)
+        close.cv.pack(anchor="e", pady=(zs(16), 0))
         win.bind("<Escape>", lambda e: self.close_help())
         win.protocol("WM_DELETE_WINDOW", self.close_help)
         win.update_idletasks()
         r = self.root
-        x = r.winfo_rootx() + r.winfo_width() - win.winfo_reqwidth() - int(16 * S)
-        y = r.winfo_rooty() + int(40 * S)
+        x = r.winfo_rootx() + r.winfo_width() - win.winfo_reqwidth() - zs(16)
+        y = r.winfo_rooty() + zs(72)
         win.geometry("+%d+%d" % (max(0, x), max(0, y)))
+        if r.tk.getboolean(r.attributes("-fullscreen")):
+            win.attributes("-topmost", True)    # else it can open behind
         win.focus_set()
+        self.help_btn.set_active(0)
 
     def close_help(self):
         if self.help_win is not None and self.help_win.winfo_exists():
             self.help_win.destroy()
         self.help_win = None
+        self.help_btn.set_active(None)
 
     # ---- control callbacks --------------------------------------------------
     def changed(self):
         self.dirty = True
 
+    def tab_clicked(self, i):
+        if self.mode.get() != i + 1:
+            self.mode.set(i + 1)
+            self.set_mode()
+
+    def shape_clicked(self, i):
+        self.shape.set(("sine", "square")[i])
+        self.seg_shape.set_active(i)
+
+    def run_clicked(self, i):
+        if i == 0:
+            self.toggle_pause()
+        else:
+            self.restart()
+
+    def arrange_right(self):
+        """View 1: phasor (+ Bode phase when linked).  View 2: both Bode plots."""
+        m = self.mode.get()
+        if m == 1:
+            items = [(self.phasor, 22)]
+            if self.link.get():
+                items.append((self.bp.cv, 10))
+        else:
+            items = [(self.bm.cv, 1), (self.bp.cv, 1)]
+        for w in (self.phasor, self.bm.cv, self.bp.cv):
+            w.grid_forget()
+        for r in range(2):
+            self.right.rowconfigure(r, weight=0, uniform="")
+        for r, (w, weight) in enumerate(items):
+            w.grid(row=r, column=0, sticky="nsew", pady=(zs(6) if r else 0, 0))
+            self.right.rowconfigure(r, weight=weight, uniform="row")
+
     def set_mode(self):
         m = self.mode.get()
+        self.tabs.set_active(m - 1)
         self.f1.pack_forget()
         self.f2.pack_forget()
         (self.f1 if m == 1 else self.f2).pack(fill="x")
+        pa, pb = self.pa, self.pb
         if m == 1:
-            self.s_phase.set_range(0.0, 360.0, "Phase lag of the feedback signal")
-            self.phasor.grid()
-            self.right.rowconfigure(0, weight=7)
-            self.pa.set_ranges(title="Into the summer")
-            self.pb.set_ranges(title="Out of the summer")
-            self.pb.hlines = []
+            self.s_phase.set_range(0.0, 360.0)
+            self.s_phase.set_sub("of feedback signal")
+            pa.configure(title="Into the summer")
+            pb.configure(title="Out of the summer")
+            pb.hlines = []
+            pa.style("vin", 3.5)
+            pa.style("vfb", 3.0, (11, 7), "V_{FB}")
+            pb.style("vin", 2.5)
+            pb.style("vd", 4.0)
         else:
-            self.s_phase.set_range(95.0, 270.0,
-                                   "Phase lag of Aβ where |Aβ| = 1 (crossover)")
-            self.phasor.grid_remove()
-            self.right.rowconfigure(0, weight=0)
+            self.s_phase.set_range(95.0, 270.0)
+            self.s_phase.set_sub("of Aβ where |Aβ| = 1")
             lim = VCC * 1.2
-            self.pa.set_ranges(title="At the summing junction", yrange=(-lim, lim))
-            self.pb.hlines = [(VCC, "#777", (6, 4), "+V_{CC}"), (-VCC, "#777", (6, 4), "−V_{CC}")]
-            self.pb.set_ranges(title="Output", yrange=(-lim, lim))
+            pa.configure(title="At the summer", yrange=(-lim, lim), yticks=[-VCC, 0, VCC])
+            pb.hlines = [(VCC, C_MID, "+V_{CC}", True), (-VCC, C_MID, "−V_{CC}", False)]
+            pb.configure(title="Output", yrange=(-lim, lim), yticks=[-VCC, 0, VCC])
+            pa.style("vin", 3.0)
+            pa.style("vfb", 2.5, DASH, "βV_{OUT}")
+            pa.style("vd", 3.0)
+            pb.style("vin", 2.5)
+            pb.style("vout", 3.5)
             self.span2 = None
             self.restart()
-        self.pa.series["vfb"]["label"] = "V_{FB}" if m == 1 else "βV_{OUT}"
-        self.pa.fast = self.pb.fast = (m == 2)
-        self.pa.show("vd", m == 2)
-        self.pb.show("vd", m == 1)
-        self.pb.show("vout", m == 2)
-        self.pa.redraw()
-        self.pb.redraw()
+        pa.fast = pb.fast = (m == 2)
+        pa.show("vd", m == 2)
+        pb.show("vd", m == 1)
+        pb.show("vout", m == 2)
+        pa.redraw()
+        pb.redraw()
+        self.arrange_right()
         self.s_phase.set(self.phase_by_mode[m])
         self.draw_diagram()
         self.dirty = True
@@ -846,6 +1244,7 @@ class App:
         self.dirty = True
 
     def link_toggled(self):
+        self.arrange_right()
         self.freq1_changed()
 
     def nudge(self, d):
@@ -855,7 +1254,7 @@ class App:
 
     def toggle_pause(self):
         self.paused = not self.paused
-        self.b_pause.configure(text="Run" if self.paused else "Pause")
+        self.run_btns.set_label(0, "Run" if self.paused else "Pause")
         return "break"
 
     def restart(self):
@@ -863,57 +1262,96 @@ class App:
         self.carry = 0.0
 
     # ---- drawing ------------------------------------------------------------
+    def draw_eq(self):
+        cv, f = self.eq, bold(28)
+        runs = [("V_{DIFF}", C_DIFF), (" = ", C_INK), ("V_{IN}", C_VIN),
+                (" − βV_{OUT}", C_INK)]
+        w = sum(rich_width(f, m) for m, _ in runs)
+        cv.configure(width=int(w) + 2, height=zs(52))
+        cv.delete("all")
+        draw_runs(cv, 1, zs(52) / 2, runs, f)
+
+    def draw_banner(self):
+        """Solid good/bad/neutral block with white text: readable from the
+        back of the room, and the colour is backed up by the words."""
+        cv = self.banner
+        cv.delete("all")
+        w, h = cv.winfo_width(), zs(112)
+        color, lines = self.banner_state
+        cv.create_rectangle(0, 0, w, h, fill=color, outline="")
+        gap = 3 * Z
+        heights = [px * lh * Z for _, px, lh in lines]
+        y = (h - sum(heights) - gap * (len(lines) - 1)) / 2
+        for (text, px, _), lh in zip(lines, heights):
+            draw_rich(cv, 18 * Z, y + lh / 2, text, bold(px), BG, "w")
+            y += lh + gap
+
     def draw_diagram(self):
+        """The block diagram, in the original 400 x 154 coordinates scaled by
+        0.73 to fit its 292 x 112 slot."""
         cv, m = self.diagram, self.mode.get()
         cv.delete("all")
-        u = S
-        loop = "#222" if m == 2 else C_OFF
-        w = 2 * u
+        u = 0.73 * Z
+        loop = C_INK if m == 2 else C_OFF
+        lw = 3.6 * u
+        f_lab, f_txt, f_big, f_small = bold(17.5), bold(15.8), bold(19.3), bold(14.9)
 
-        def line(*p, color="#222", arrow=None):
-            cv.create_line(*[v * u for v in p], fill=color, width=w, arrow=arrow,
-                           arrowshape=(9 * u, 11 * u, 4 * u))
+        def line(pts, color=C_INK, arrow=False):
+            p = [v * u for v in pts]
+            ex, ey = p[-2], p[-1]
+            if arrow:
+                dx, dy = ex - p[-4], ey - p[-3]
+                ln = math.hypot(dx, dy)
+                ux, uy = dx / ln, dy / ln
+                p[-2], p[-1] = ex - ux * 8 * u, ey - uy * 8 * u
+            cv.create_line(*p, fill=color, width=lw, joinstyle="miter", capstyle="butt")
+            if arrow:
+                a, b = 13 * u, 6 * u
+                cv.create_polygon(ex, ey, ex - ux * a - uy * b, ey - uy * a + ux * b,
+                                  ex - ux * a + uy * b, ey - uy * a - ux * b,
+                                  fill=color, outline="")
 
-        def text(x, y, s, color="#222", font=None, anchor="center"):
-            draw_rich(cv, x * u, y * u, s, font or self.f_bold, color, anchor)
+        def circ(x, y, r, stroke=None, fill=""):
+            cv.create_oval((x - r) * u, (y - r) * u, (x + r) * u, (y + r) * u,
+                           outline=stroke or "", fill=fill, width=lw if stroke else 0)
 
-        y = 50
-        text(22, y, "V_{IN}", C_VIN)
-        cv.create_oval(42 * u, (y - 4) * u, 50 * u, (y + 4) * u, outline="#222", width=w)
-        line(50, y, 101, y, arrow="last")
-        cv.create_oval(101 * u, (y - 15) * u, 131 * u, (y + 15) * u, outline="#222",
-                       width=w, fill="white")
-        text(116, y, "Σ")
+        def text(x, y, s, color=C_INK, font=f_txt):
+            draw_rich(cv, x * u, y * u, s, font, color)
+
+        y, fy = 50, 112
+        text(22, y, "V_{IN}", C_VIN, f_lab)
+        circ(46, y, 4, C_INK)
+        line([50, y, 101, y], arrow=True)
+        circ(116, y, 15, C_INK, BG)
+        text(116, y + 1, "Σ")
         text(90, y - 13, "+")
-        text(101, y + 26, "−", font=self.f_big)
-        line(131, y, 205, y, color="#222", arrow="last")
-        text(168, y - 16, "V_{DIFF}", C_DIFF)
+        text(101, y + 27, "−", font=f_big)
+        line([131, y, 205, y], arrow=True)
+        text(168, y - 18, "V_{DIFF}", C_DIFF, f_lab)
         cv.create_polygon(205 * u, (y - 22) * u, 205 * u, (y + 22) * u, 250 * u, y * u,
-                          outline=loop, fill="white" if m == 2 else self.bg, width=w)
-        text(220, y, "A", loop)
-        line(250, y, 330, y, color=loop, arrow="last")
-        cv.create_oval(330 * u, (y - 4) * u, 338 * u, (y + 4) * u, outline=loop, width=w)
-        text(364, y, "V_{OUT}", C_OUT if m == 2 else C_OFF)
-        fy = 112
+                          outline=loop, fill=BG, width=lw, joinstyle="miter")
+        text(220, y + 1, "A", loop)
+        line([250, y, 330, y], loop, arrow=True)
+        circ(334, y, 4, loop)
+        text(367, y, "V_{OUT}", C_OUT if m == 2 else C_OFF, f_lab)
         if m == 2:
-            cv.create_oval(286 * u, (y - 4) * u, 294 * u, (y + 4) * u, fill="#222", outline="")
-            line(290, y, 290, fy, 240, fy, arrow="last")
+            circ(290, y, 5, None, C_INK)
+            line([290, y, 290, fy, 240, fy], arrow=True)
             cv.create_rectangle(206 * u, (fy - 15) * u, 240 * u, (fy + 15) * u,
-                                outline="#222", width=w, fill="white")
-            text(223, fy, "β")
-            line(206, fy, 116, fy, 116, y + 15, arrow="last")
-            text(160, fy + 14, "βV_{OUT}", C_FB)
+                                outline=C_INK, width=lw, fill=BG)
+            text(223, fy + 1, "β")
+            line([206, fy, 116, fy, 116, y + 15], arrow=True)
+            text(165, fy + 18, "βV_{OUT}", C_FB, f_lab)
         else:
-            line(290, y, 290, fy, 240, fy, color=C_OFF)
+            line([290, y, 290, fy, 240, fy], C_OFF)
             cv.create_rectangle(206 * u, (fy - 15) * u, 240 * u, (fy + 15) * u,
-                                outline=C_OFF, width=w)
-            text(223, fy, "β", C_OFF)
-            cv.create_oval(170 * u, (fy - 12) * u, 194 * u, (fy + 12) * u, outline=C_FB,
-                           width=w, fill="white")
-            text(182, fy, "~", C_FB, self.f_big)
-            line(170, fy, 116, fy, 116, y + 15, color=C_FB, arrow="last")
-            text(143, fy + 14, "V_{FB}", C_FB)
-            text(250, fy + 27, "(loop not connected)", C_OFF, self.f_small)
+                                outline=C_OFF, width=lw)
+            text(223, fy + 1, "β", C_OFF)
+            circ(182, fy, 12, C_FB, BG)
+            text(182, fy, "~", C_FB, f_big)
+            line([170, fy, 116, fy, 116, y + 15], C_FB, arrow=True)
+            text(143, fy + 18, "V_{FB}", C_FB, f_lab)
+            text(292, fy + 30, "loop not connected", C_OFF, f_small)
 
     def draw_phasor(self):
         cv = self.phasor
@@ -923,51 +1361,73 @@ class App:
         w, h = cv.winfo_width(), cv.winfo_height()
         k = self.s_k.get()
         phi = math.radians(self.s_phase.get())
-        top = 28 * S
-        sc = min(w / 3.9, (h - top - 22 * S) / 3.15)
-        ox, oy = w / 2 - 0.7 * sc, top + (h - top - 22 * S) / 2
+        top, bot = 30 * Z, 26 * Z
+        sc = min(w / 3.9, (h - top - bot) / 3.15)
+        ox, oy = w / 2 - 0.7 * sc, top + (h - top - bot) / 2
 
         def P(x, y):
             return ox + x * sc, oy - y * sc
 
-        draw_rich(cv, 8 * S, 6 * S, "Phasor view:  V_{DIFF} = V_{IN} − V_{FB}",
-                  self.f_bold, "#222", "nw")
-        cv.create_oval(*P(-1, 1), *P(1, -1), outline="#3b9a57", dash=(5, 4), width=1.5 * S,
-                       fill="#eef8f0")
-        draw_rich(cv, *P(-0.71, -0.71), " |V_{IN}| ", self.f_small, "#3b9a57", "ne")
-        cv.create_oval(*P(1 - k, k), *P(1 + k, -k), outline="#f0c48a", dash=(2, 4))
-        cv.create_line(*P(-1.25, 0), *P(2.6, 0), fill=C_GRID)
-        cv.create_line(*P(0, -1.6), *P(0, 1.6), fill=C_GRID)
+        def arrow(a, b, color, width, dash=None):
+            (xa, ya), (xb, yb) = P(*a), P(*b)
+            ln = math.hypot(xb - xa, yb - ya)
+            if ln < 1:
+                return
+            ux, uy, hl, hw = (xb - xa) / ln, (yb - ya) / ln, min(18 * Z, ln), 8 * Z
+            # shaft stops short of the tip and the head is a separate polygon:
+            # Tk's own arrowheads go odd on wide or dashed lines
+            xe, ye = xb - ux * hl * 0.8, yb - uy * hl * 0.8
+            if dash:
+                dashed_line(cv, xa, ya, xe, ye, width * Z, zdash(dash), color)
+            else:
+                cv.create_line(xa, ya, xe, ye, fill=color, width=width * Z,
+                               capstyle="butt")
+            cv.create_polygon(xb, yb, xb - ux * hl - uy * hw, yb - uy * hl + ux * hw,
+                              xb - ux * hl + uy * hw, yb - uy * hl - ux * hw,
+                              fill=color, outline="")
+
+        draw_rich(cv, 4 * Z, 14 * Z, "V_{DIFF} = V_{IN} − V_{FB}", bold(19), C_INK, "w")
+        cv.create_oval(ox - sc, oy - sc, ox + sc, oy + sc, fill=C_CIRCLE, outline="")
+        if sc > 5:      # dashed outline as solid arcs (see dashed_line())
+            on, step = math.degrees(10 * Z / sc), math.degrees(17 * Z / sc)
+            a = 0.0
+            while a < 360 - step / 2:
+                cv.create_arc(ox - sc, oy - sc, ox + sc, oy + sc, start=a, extent=on,
+                              style="arc", outline=C_OUT, width=3.5 * Z)
+                a += step
+        cv.create_line(*P(-1.25, 0), *P(2.6, 0), fill=C_PAXIS, width=2 * Z)
+        cv.create_line(*P(0, -1.6), *P(0, 1.6), fill=C_PAXIS, width=2 * Z)
         dx, dy = 1 - k * math.cos(phi), k * math.sin(phi)
-        shape = (11 * S, 13 * S, 5 * S)
-        cv.create_line(*P(0, 0), *P(1, 0), fill=C_VIN, width=3 * S, arrow="last", arrowshape=shape)
-        if k > 0.02:
-            cv.create_line(*P(1, 0), *P(dx, dy), fill=C_FB, width=3 * S, arrow="last",
-                           arrowshape=shape)
-        if math.hypot(dx, dy) > 0.03:
-            cv.create_line(*P(0, 0), *P(dx, dy), fill=C_DIFF, width=4 * S, arrow="last",
-                           arrowshape=shape)
-        # labels: Vin on the side of the axis away from Vdiff, Vdiff just past
-        # its own tip, -Vfb beside its midpoint on the side away from the origin
-        below = dy >= 0
-        draw_rich(cv, P(0.5, 0)[0], oy + (8 if below else -8) * S, "V_{IN}",
-                  self.f_bold, C_VIN, "n" if below else "s")
         mag = math.hypot(dx, dy)
-        ux, uy = (dx / mag, dy / mag) if mag > 0.03 else (0.0, 1.0)
-        tx, ty = P(dx, dy)
-        draw_rich(cv, tx + ux * 26 * S, ty - uy * 16 * S, "V_{DIFF}",
-                  self.f_bold, C_DIFF)
+        arrow((0, 0), (1, 0), C_VIN, 6)
         if k > 0.02:
-            nx, ny = math.sin(phi), math.cos(phi)      # normal to -Vfb
+            arrow((1, 0), (dx, dy), C_FB, 5, (10, 6))
+        if mag > 0.03:
+            arrow((0, 0), (dx, dy), C_DIFF, 7)
+        # labels: V_IN on the side of the axis away from V_DIFF, V_DIFF just
+        # past its own tip, -V_FB beside its midpoint away from the origin
+        f = bold(20)
+        below = dy >= 0
+        draw_rich(cv, P(0.5, 0)[0], oy + (18 if below else -18) * Z, "V_{IN}", f, C_VIN)
+        # a short V_DIFF (near 0 deg) would put its label on top of V_IN and
+        # -V_FB, so it moves up and left instead
+        tiny = mag < 0.35
+        if tiny:
+            ux, uy = 0.0, (1.0 if below else -1.0)
+        else:
+            ux, uy = dx / mag, dy / mag
+        tx, ty = P(dx, dy)
+        draw_rich(cv, tx + (ux * 34 - (26 if tiny else 0)) * Z,
+                  ty - uy * (26 if tiny else 20) * Z, "V_{DIFF}", f, C_DIFF)
+        if k > 0.02:
+            nx, ny = math.sin(phi), math.cos(phi)      # normal to -V_FB
             mx, my = (1 + dx) / 2, dy / 2
             if nx * mx + ny * my < 0:
                 nx, ny = -nx, -ny
             qx, qy = P(mx, my)
-            draw_rich(cv, qx + nx * 26 * S, qy - ny * 16 * S, "−V_{FB}",
-                      self.f_bold, C_FB)
-        draw_rich(cv, w / 2, h - 4 * S,
-                  "inside the dashed circle: V_{DIFF} is smaller than V_{IN}",
-                  self.f_small, "#3b9a57", "s")
+            draw_rich(cv, qx + nx * 34 * Z, qy - ny * 20 * Z, "−V_{FB}", f, C_FB)
+        draw_rich(cv, w / 2, h - 12 * Z, "inside the circle:  |V_{DIFF}| < |V_{IN}|",
+                  bold(17), C_GOOD)
 
     def refresh(self):
         """Everything that only changes when a control moves."""
@@ -988,22 +1448,22 @@ class App:
             vd = [a - b for a, b in zip(vin, vfb)]
             lim = math.ceil((1 + k) * 1.05 * 2) / 2.0
             for p in (self.pa, self.pb):
-                p.set_ranges(xrange=(0, span * mul), yrange=(-lim, lim),
-                             xlabel="time (%s)" % unit)
+                p.configure(xrange=(0, span * mul), yrange=(-lim, lim),
+                            yticks=[-lim, 0, lim], xunit=unit)
             self.pa.set_data("vin", xs, vin)
             self.pa.set_data("vfb", xs, vfb)
             self.pb.set_data("vin", xs, vin)
             self.pb.set_data("vd", xs, vd)
             self.draw_phasor()
             if ratio < 0.995:
-                color, msg = C_GOOD, "feedback is shrinking V_{DIFF}  (acting as negative feedback)"
+                color, msg = C_GOOD, "Negative feedback — the difference shrinks"
             elif ratio > 1.005:
-                color, msg = C_BAD, "feedback is enlarging V_{DIFF}  (acting as positive feedback)"
+                color, msg = C_BAD, "Positive feedback — the difference grows"
             else:
-                color, msg = "#555", "feedback is rotating V_{DIFF} but not shrinking it"
-            self.l_line1.set("|V_{DIFF}| = %.2f × |V_{IN}|" % ratio, fg=color)
-            self.l_line2.set(msg, fg=color)
-            self.s_phase.value.configure(fg=C_BAD if ph >= 180 else "#222")
+                color, msg = C_MID, "Rotated, but not shrunk"
+            self.banner_state = (color, [("|V_{DIFF}| = %.2f × |V_{IN}|" % ratio, 36, 1.25),
+                                         (msg, 22, 1.1)])
+            self.s_phase.set_alert(ph >= 180)
             tau, fsig = TAU_VIEW1, (f if self.link.get() else None)
         else:
             tau = tau_for_crossover_phase(ph)
@@ -1012,37 +1472,36 @@ class App:
             gm = -20 * math.log10(loop_mag(f180)) if f180 else None
             if pm > 0.5:
                 color = C_GOOD
-                msg = "Stable — disturbances ring and die out"
-                if pm < 45:
-                    msg = "Stable, but barely — lots of overshoot and ringing"
+                msg = ("Stable — ringing dies out" if pm >= 45
+                       else "Stable, but barely — heavy ringing")
             elif pm < -0.5:
                 color = C_BAD
-                msg = "Unstable — oscillation grows until it hits the ±%g V rails" % VCC
+                msg = "Unstable — grows until it hits the ±%g V rails" % VCC
             else:
-                color, msg = "#a15c00", "Right on the edge — a sustained oscillation"
-            line1 = "Phase margin = 180° − %.0f° = %+.0f°" % (ph, pm)
+                color, msg = C_MID, "On the edge — sustained oscillation"
+            sign = "+" if pm > 0 else "−" if pm < 0 else ""
+            lines = [("Phase margin %s%.0f°" % (sign, abs(pm)), 36, 1.15), (msg, 22, 1.1)]
             if gm is not None:
-                msg += "\n(gain margin %+.1f dB)" % gm
-            self.l_line1.set(line1.replace("-", "−"), fg=color)
-            self.l_line2.set(msg.replace("-", "−"), fg=color)
-            self.s_phase.value.configure(fg=C_BAD if ph > 180 else "#222")
+                lines.append(("Gain margin %s%.1f dB" % ("+" if gm >= 0 else "−", abs(gm)),
+                              18, 1.1))
+            self.banner_state = (color, lines)
+            self.s_phase.set_alert(ph > 180)
             fsig = self.s_f2.get()
-        # Bode plot
+        self.draw_banner()
+        # Bode plots
         self.bp.set_data("ph", self.bode_f, [-loop_phase(f, tau) for f in self.bode_f])
         f180 = freq_for_phase(180.0, tau)
         for p in (self.bm, self.bp):
-            p.put("fc", "vline", x=FC, color="#888", dash=(4, 3))
-            p.put("f180", "vline", x=f180, color=C_BAD, dash=(4, 3))
+            p.put("fc", "vline", x=FC, color=C_MID, dash=DASH)
+            p.put("f180", "vline", x=f180, color=C_DIFF, dash=DASH)
             p.put("fsig", "vline", x=fsig, color=C_VIN)
-        self.bm.put("fc_t", "text", x=FC, text="|Aβ| = 1", color="#666", anchor="ne",
-                    dx=-4, dy=3)
-        self.bp.put("f180_t", "text", x=f180, text="−180°", color=C_BAD,
-                    anchor="sw", y=-360, dx=4, dy=-2)
-        self.bm.put("fc_d", "dot", x=FC, y=0, color="#555")
-        self.bp.put("fc_d", "dot", x=FC, y=-loop_phase(FC, tau), color="#555")
-        if f180:
-            self.bm.put("f180_d", "dot", x=f180, y=20 * math.log10(loop_mag(f180)), color=C_BAD)
-        self.bp.put("f180_d", "dot", x=f180, y=-180, color=C_BAD)
+        self.bm.put("fc_t", "text", x=FC, text="|Aβ| = 1", color=C_MID, anchor="e",
+                    dx=-8, dy=16)
+        self.bm.put("fc_d", "dot", x=FC, y=0, color=C_MID)
+        self.bp.put("fc_d", "dot", x=FC, y=-loop_phase(FC, tau), color=C_MID)
+        self.bm.put("f180_d", "dot", x=f180,
+                    y=20 * math.log10(loop_mag(f180)) if f180 else 0, color=C_DIFF)
+        self.bp.put("f180_d", "dot", x=f180, y=-180, color=C_DIFF)
         if fsig:
             self.bm.put("fsig_d", "dot", x=fsig, y=20 * math.log10(loop_mag(fsig)), color=C_VIN)
             self.bp.put("fsig_d", "dot", x=fsig, y=-loop_phase(fsig, tau), color=C_VIN)
@@ -1063,9 +1522,8 @@ class App:
             span = min(1e-3, max(1e-4, 2.5 / f))
             if span != self.span2:
                 self.span2 = span
-                label = "time (ms)   —   slow motion, newest at right"
-                self.pa.set_ranges(xrange=(-span * 1e3, 0), xlabel=label)
-                self.pb.set_ranges(xrange=(-span * 1e3, 0), xlabel=label)
+                self.pa.configure(xrange=(-span * 1e3, 0), xunit="ms")
+                self.pb.configure(xrange=(-span * 1e3, 0), xunit="ms")
             if not self.paused:
                 steps = elapsed * span * self.s_speed.get() / self.SWEEP_S / sim.DT + self.carry
                 n = int(steps)
@@ -1094,11 +1552,13 @@ def main():
         pass
     root = tk.Tk()
     sw, sh = root.winfo_screenwidth(), root.winfo_screenheight()
-    s = max(1.0, root.winfo_fpixels("1i") / 96.0)
-    w, h = min(int(1340 * s), sw - 40), min(int(800 * s), sh - 90)
+    dpi = max(1.0, root.winfo_fpixels("1i") / 96.0)
+    # 4:3, the design stage scaled by the DPI factor, shrunk to fit the screen
+    z = min(dpi, (sw - 40) / STAGE_W, (sh - 90) / STAGE_H)
+    w, h = int(STAGE_W * z), int(STAGE_H * z)
     root.geometry("%dx%d+%d+%d" % (w, h, (sw - w) // 2, max(0, (sh - h) // 2 - 20)))
-    root.minsize(int(900 * s), int(600 * s))
-    App(root)
+    root.minsize(min(800, w), min(600, h))
+    App(root, z)
     root.mainloop()
 
 
