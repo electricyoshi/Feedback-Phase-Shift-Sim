@@ -552,6 +552,23 @@ HELP2 = ("Now V_{DIFF} drives amplifier A (gain 200, ±5 V rails) and "
          "• Go past 180° and wait.\n"
          "• Set V_{IN} to 0: it oscillates on its own.")
 
+# Notes behind the "?" button: (heading, body) pairs.
+NOTES = (
+    ("The phase slider means something different in each view",
+     "• View 1: the lag of the feedback signal relative to V_{IN}.\n"
+     "• View 2: the phase of the loop gain Aβ at crossover (|Aβ| = 1). That is "
+     "what decides stability, not the phase at the input frequency."),
+    ("The amplifier model uses a delay for the extra phase",
+     "A = 200 with one pole at 1 kHz and β = 0.5, so the closed-loop gain is "
+     "about 2 and crossover is near 100 kHz. A pure time delay stands in for "
+     "the amplifier's higher poles. A delay adds lag without changing |Aβ|, "
+     "which is what lets one slider move only the phase curve."),
+    ("Feedback size in view 1 is manual",
+     "\"Link phase to frequency\" ties only the phase to the Bode plot. The "
+     "amplitude of the feedback signal stays wherever the Feedback size "
+     "slider puts it."),
+)
+
 
 class App:
     SWEEP_S = 6.0     # real seconds for one screen-width of simulated time
@@ -641,7 +658,7 @@ class App:
                   font=self.f_small, foreground="#666").pack(side="bottom", anchor="w")
 
         # ---- top: block diagram + readout ----------------------------------
-        top = ttk.Frame(root, padding=(4, 8, 10, 0))
+        top = ttk.Frame(root, padding=(4, 8, int(40 * S), 0))   # room for "?"
         top.grid(row=0, column=1, columnspan=2, sticky="ew")
         self.diagram = tk.Canvas(top, width=int(400 * S), height=int(154 * S),
                                  bg=self.bg, highlightthickness=0)
@@ -713,8 +730,57 @@ class App:
         root.unbind_class("TRadiobutton", "<space>")
         root.unbind_class("TCheckbutton", "<space>")
 
+        # ---- help button (upper right corner) -------------------------------
+        self.help_win = None
+        d = int(24 * S)
+        hb = tk.Canvas(root, width=d, height=d, bg=self.bg, highlightthickness=0,
+                       cursor="hand2")
+        circ = hb.create_oval(1, 1, d - 1, d - 1, fill="#d4d7dc", outline="#a9aeb5")
+        hb.create_text(d / 2, d / 2, text="?", fill="#555",
+                       font=tkfont.Font(family=fam, size=11, weight="bold"))
+        hb.bind("<Enter>", lambda e: hb.itemconfigure(circ, fill="#bfc3c9"))
+        hb.bind("<Leave>", lambda e: hb.itemconfigure(circ, fill="#d4d7dc"))
+        hb.bind("<Button-1>", lambda e: self.toggle_help())
+        hb.place(relx=1.0, x=-int(10 * S), y=int(8 * S), anchor="ne")
+        tk.Misc.tkraise(hb)     # Canvas.lift() means raise an item, not the widget
+
         self.set_mode()
         self.tick()
+
+    # ---- help notes -----------------------------------------------------------
+    def toggle_help(self):
+        if self.help_win is not None and self.help_win.winfo_exists():
+            self.close_help()
+            return
+        win = tk.Toplevel(self.root)
+        self.help_win = win
+        win.title("Notes")
+        win.transient(self.root)
+        win.resizable(False, False)
+        win.configure(bg=self.bg)
+        body = ttk.Frame(win, padding=(16, 12, 16, 14))
+        body.pack(fill="both", expand=True)
+        wrap = int(420 * S)
+        for i, (head, text) in enumerate(NOTES):
+            ttk.Label(body, text=head, font=self.f_bold).pack(
+                anchor="w", pady=(0 if i == 0 else 12, 3))
+            RichText(body, tkfont.nametofont("TkDefaultFont"), text,
+                     wrap_px=wrap).pack(anchor="w")
+        ttk.Button(body, text="Close", command=self.close_help).pack(
+            anchor="e", pady=(14, 0))
+        win.bind("<Escape>", lambda e: self.close_help())
+        win.protocol("WM_DELETE_WINDOW", self.close_help)
+        win.update_idletasks()
+        r = self.root
+        x = r.winfo_rootx() + r.winfo_width() - win.winfo_reqwidth() - int(16 * S)
+        y = r.winfo_rooty() + int(40 * S)
+        win.geometry("+%d+%d" % (max(0, x), max(0, y)))
+        win.focus_set()
+
+    def close_help(self):
+        if self.help_win is not None and self.help_win.winfo_exists():
+            self.help_win.destroy()
+        self.help_win = None
 
     # ---- control callbacks --------------------------------------------------
     def changed(self):
