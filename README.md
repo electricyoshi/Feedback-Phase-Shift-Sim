@@ -5,22 +5,28 @@ V<sub>DIFF</sub> = V<sub>IN</sub> − βV<sub>OUT</sub> as the fed-back signal's
 
 ![View 2: an unstable loop, with the output growing until it clips at the rails](docs/view2-unstable.png)
 
-## Quick start (about a minute, nothing to install)
+## Quick start
+
+**[▶ Run it in your browser](https://electricyoshi.github.io/Feedback-Phase-Shift-Sim/feedback_phase_sim.html)**
+— nothing to download or install. Then drag the big **Phase lag** slider and watch the
+banner change from green to orange as you pass 180°.
+
+Works on Windows, Mac, Chromebook and Linux in a current Chrome, Edge, Firefox or
+Safari.
+
+### Offline copy
+
+To use it without internet (it is one self-contained file):
 
 1. **[Download the ZIP](https://github.com/electricyoshi/Feedback-Phase-Shift-Sim/archive/refs/heads/main.zip)**
    (the same thing as the green **Code** button → **Download ZIP**) and unzip it.
 2. Double-click **`feedback_phase_sim.html`**. It opens in your browser.
-3. Drag the big **Phase lag** slider and watch the banner change from green to orange
-   as you pass 180°.
 
-Works on Windows, Mac, Chromebook and Linux in a current Chrome, Edge, Firefox or
-Safari. It is one self-contained file: no internet needed once downloaded.
-
-If it doesn't work:
+If the offline copy doesn't work:
 
 - **You see a page of code instead of the simulator.** You clicked the file on
-  GitHub, which only shows its source. Download it (step 1) and open the copy on
-  your computer.
+  GitHub, which only shows its source. Use the **Run it in your browser** link
+  above, or download it (step 1) and open the copy on your computer.
 - **Double-clicking does nothing, or opens a text editor.** Right-click the file →
   **Open with** → your browser. On Windows, unzip first rather than opening the file
   from inside the ZIP.
@@ -54,7 +60,8 @@ If it doesn't work:
   oscillating on its own, with no input at all.
 
 Keys: ← / → nudge the phase 1° (Shift for 10°), Space pauses. Adding `#2` to the
-address opens the page straight in view 2.
+address opens the page straight in view 2
+([direct link](https://electricyoshi.github.io/Feedback-Phase-Shift-Sim/feedback_phase_sim.html#2)).
 
 ## Run the desktop version (Python)
 

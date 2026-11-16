@@ -86,3 +86,6 @@ paths and personal details.
 
 ## Status
 - Public on GitHub: https://github.com/electricyoshi/Feedback-Phase-Shift-Sim (main). MIT licensed (holder: electricyoshi).
+- GitHub Pages is on (legacy build from `main` /), so every push to main redeploys
+  https://electricyoshi.github.io/Feedback-Phase-Shift-Sim/feedback_phase_sim.html -
+  the link students are given. A broken HTML on main is live within a minute or two.
