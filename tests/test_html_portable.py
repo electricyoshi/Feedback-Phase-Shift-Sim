@@ -1,10 +1,12 @@
-"""Will feedback_phase_sim.html open on a student's PC or Mac?
+"""Will feedback_phase_sim.html open on a student's PC, Mac or phone?
 
 Static checks (always run): one self-contained file, nothing fetched, no
 syntax that old Safari chokes on.  Browser checks (skipped when no Chrome,
 Edge or Chromium is installed): load it from file:// in a real headless
-browser and confirm the script ran in both views without an error.
+browser and confirm the script ran in both views without an error, and
+measure the portrait (phone) layout at real phone sizes.
 """
+import json
 import os
 import pathlib
 import re
@@ -116,6 +118,145 @@ class InBrowser(unittest.TestCase):
         self.has(dom, "Gain margin +9.4 dB")
         for c in ("cvD", "cvPA", "cvPB", "cvR1", "cvR2"):
             self.drawn(dom, c)
+
+
+# Appended to a scratch copy of the page, after the main script.  Drives the
+# page through its states and measures the layout, then posts the numbers to
+# the parent frame (file:// frames are cross-origin, so no direct access).
+PROBE = r"""
+<script>
+requestAnimationFrame = function () {};       // keep the states this script sets
+(function () {
+  var de = document.documentElement, vw = de.clientWidth, $ = function (id) { return document.getElementById(id); };
+  var out = { portrait: de.classList.contains('portrait'), vw: vw, vh: innerHeight,
+              transform: $('stage').style.transform, wide: [], textOverflow: [], stickGap: [],
+              bannerH: [], canvases: {} };
+  function check(tag) {
+    // anything sticking out past the screen edge means sideways scrolling or a cut-off control
+    var all = document.querySelectorAll('#stage *');
+    for (var i = 0; i < all.length; i++) {
+      var r = all[i].getBoundingClientRect();
+      if (r.width && (r.left < -0.5 || r.right > vw + 0.5)) out.wide.push(tag + ' ' + (all[i].id || all[i].className || all[i].tagName));
+    }
+    ['b1', 'b2', 'b3', 'eq', 'tab1', 'tab2', 'phaseTitle', 'phaseSub', 'phaseVal'].forEach(function (id) {
+      var e = $(id);
+      if (e.offsetWidth && e.scrollWidth > e.clientWidth + 1) out.textOverflow.push(tag + ' ' + id);
+    });
+    out.bannerH.push($('banner').offsetHeight);
+    if (out.portrait) out.stickGap.push(parseFloat($('phasebar').style.top) - $('banner').offsetHeight);
+  }
+  function canvases(view) {
+    ['cvD', 'cvPA', 'cvPB', 'cvR1', 'cvR2'].forEach(function (id) {
+      var c = $(id);
+      if (c.offsetWidth) out.canvases[view + id] = [c.offsetWidth, c.offsetHeight, c.width];
+    });
+  }
+  frame(last + 100);
+  [0, 0.9, 1.5].forEach(function (k) { [0, 90, 150, 180, 270, 360].forEach(function (p) {
+    S.k = k; S.ph[1] = p; update(); check('v1 k=' + k + ' ph=' + p);
+  }); });
+  S.k = 0.9; S.link = true; update(); frame(last + 100); canvases('v1 linked ');
+  setMode(2);
+  for (var p = 95; p <= 270; p += 5) { setPhase(p); check('v2 ph=' + p); }
+  setPhase(120); frame(last + 100); canvases('v2 ');
+  out.docWidth = [de.scrollWidth, vw];
+  // scrolled down: banner and phase bar stay at the top, the plots pass under them
+  scrollTo(0, 1200);
+  out.scrollY = scrollY;
+  out.bannerTop = $('banner').getBoundingClientRect().top;
+  out.phaseTop = $('phasebar').getBoundingClientRect().top - $('banner').getBoundingClientRect().bottom;
+  out.plotUnder = $('cvPA').getBoundingClientRect().bottom < $('phasebar').getBoundingClientRect().bottom;
+  // the "?" notes cover the screen wherever the page is scrolled to, and fit across it
+  showNotes(true);
+  var n = $('notes').getBoundingClientRect(), nb = $('notesBody').getBoundingClientRect();
+  out.notes = [n.top, n.height, nb.left, nb.right];
+  out.err = $('err').textContent;
+  parent.postMessage(JSON.stringify(out), '*');
+})();
+</script>
+"""
+
+
+@unittest.skipUnless(find_browser(), "needs Chrome, Edge or Chromium installed")
+class Layout(unittest.TestCase):
+    """Phone-sized checks.  Headless Chrome won't make a window narrower than
+    about 512 px, so the page runs in an iframe of the phone's size: the
+    iframe is the page's viewport, exactly as a phone screen would be."""
+
+    def measure(self, w, h, dpr=1):
+        page = HTML.read_text(encoding="utf-8").replace("</body>", PROBE + "</body>")
+        frame = ('<!doctype html><html><body style="margin:0"><pre id="out"></pre>'
+                 '<iframe src="page.html" width="%d" height="%d" style="border:0;display:block"></iframe>'
+                 '<script>addEventListener("message", function (e) {'
+                 ' document.getElementById("out").textContent = e.data; });</script>'
+                 '</body></html>' % (w, h))
+        with tempfile.TemporaryDirectory() as d:
+            d = pathlib.Path(d)
+            (d / "page.html").write_text(page, encoding="utf-8")
+            (d / "frame.html").write_text(frame, encoding="utf-8")
+            r = subprocess.run(
+                [find_browser(), "--headless=new", "--disable-gpu", "--no-first-run",
+                 "--hide-scrollbars",            # phones overlay their scrollbars
+                 "--user-data-dir=" + str(d / "profile"), "--window-size=%d,%d" % (max(w, 600), h + 50),
+                 "--force-device-scale-factor=%s" % dpr,
+                 "--virtual-time-budget=3000", "--dump-dom", (d / "frame.html").as_uri()],
+                capture_output=True, encoding="utf-8", errors="replace", timeout=120)
+        m = re.search(r'<pre id="out">(.*?)</pre>', r.stdout, re.S)
+        self.assertTrue(m and m.group(1), "probe never reported:\n" + r.stderr[-2000:])
+        out = json.loads(m.group(1).replace("&quot;", '"').replace("&amp;", "&")
+                         .replace("&lt;", "<").replace("&gt;", ">"))
+        self.assertEqual(out["vw"], w, "the iframe trick didn't give a %d px viewport" % w)
+        self.assertEqual(out["err"], "")
+        return out
+
+    def check_portrait(self, w, h, dpr=1):
+        out = self.measure(w, h, dpr)
+        self.assertTrue(out["portrait"], "%dx%d should get the portrait layout" % (w, h))
+        self.assertEqual(out["transform"], "", "portrait layout must not be scaled")
+        self.assertEqual(out["wide"], [], "sticks out past the right edge of a %d px screen" % w)
+        self.assertEqual(out["textOverflow"], [], "text doesn't fit its box")
+        self.assertLessEqual(out["docWidth"][0], out["docWidth"][1], "page scrolls sideways")
+        # banner: same height in every state (else the phase bar jumps while dragging),
+        # with the phase bar stuck 8 px under it
+        self.assertEqual(len(set(out["bannerH"])), 1, "banner height changes: %s" % sorted(set(out["bannerH"])))
+        self.assertEqual(set(out["stickGap"]), {8})
+        self.assertGreater(out["scrollY"], 0, "page doesn't scroll")
+        self.assertEqual(out["bannerTop"], 0, "banner didn't stick to the top")
+        self.assertEqual(out["phaseTop"], 8, "phase bar didn't stick under the banner")
+        self.assertTrue(out["plotUnder"], "plots should scroll under the sticky bars")
+        top, height, left, right = out["notes"]
+        self.assertEqual((top, height), (0, h), "notes should cover the screen")
+        self.assertGreaterEqual(left, 0); self.assertLessEqual(right, w)
+        # every plot gets the column's width and a readable height, and was drawn
+        for name, (cw, ch, px) in out["canvases"].items():
+            # (the block diagram is capped at 440 px: it only gets taller beyond that)
+            self.assertGreaterEqual(cw, min(w, 440 if name.endswith("cvD") else 720) - 30, name)
+            self.assertGreaterEqual(ch, 140, name)
+            self.assertGreaterEqual(px, cw * max(2, dpr), name + " not drawn at full resolution")
+        for name in ("v1 linked cvPA", "v1 linked cvR1", "v1 linked cvR2", "v2 cvR2"):
+            self.assertIn(name, out["canvases"])
+        return out
+
+    def test_small_phone(self):            # iPhone SE (1st gen): the narrowest still around
+        self.check_portrait(320, 568)
+
+    def test_android_phone(self):
+        self.check_portrait(360, 780)
+
+    def test_iphone_at_3x(self):
+        self.check_portrait(390, 844, dpr=3)
+
+    def test_large_phone(self):
+        self.check_portrait(430, 932)
+
+    def test_tablet_portrait_is_capped_and_centred(self):
+        self.check_portrait(820, 1180)
+
+    def test_landscape_keeps_the_projector_layout(self):
+        for w, h in ((844, 390), (1024, 768), (1180, 820)):
+            out = self.measure(w, h)
+            self.assertFalse(out["portrait"], "%dx%d" % (w, h))
+            self.assertTrue(out["transform"].startswith("scale("), "%dx%d" % (w, h))
 
 
 if __name__ == "__main__":

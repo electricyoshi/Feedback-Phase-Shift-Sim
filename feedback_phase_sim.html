@@ -81,6 +81,67 @@
   #notes h3:first-child { margin-top: 0; }
   #notes p { font-size: 17px; color: #555555; margin: 0; white-space: pre-line; }
   #notes .close { display: block; margin: 16px 0 0 auto; padding: 0 16px; font-size: 17px; }
+  html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }   /* no iOS font inflation */
+  #stage { -webkit-user-select: none; -webkit-touch-callout: none; }
+  button, input, label { touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+
+  /* -------------------------------------------------------------------------
+     Portrait (phone held upright, or any window taller than it is wide):
+     fit() puts class "portrait" on <html>.  Sizes here are real CSS px, not
+     stage px - no scaling - and the page scrolls vertically.  One column:
+     header, diagram, banner + phase bar (both stick to the top while the
+     plots scroll under them), plots, then the controls.  Desktop/projector
+     layout above is untouched.  Browser only: the Python app has no portrait
+     layout.
+     ---------------------------------------------------------------------- */
+  html.portrait, html.portrait body { height: auto; overflow: visible; }
+  .portrait #stage {
+    position: relative; left: auto; top: auto; width: auto; height: auto; max-width: 720px;
+    margin: 0 auto; transform: none; padding: 8px;
+  }
+  .portrait #header { flex-wrap: wrap; height: auto; gap: 8px; }
+  .portrait #header .spacer { display: none; }
+  /* row 1: the two tabs (40 % basis each, so nothing else fits beside them);
+     row 2: the equation, centred (padding = the "?" width), and "?" */
+  .portrait #header #tab1, .portrait #header #tab2 {
+    flex: 1 1 40%; min-width: 0; height: 52px; padding: 0 6px; font-size: 17px; line-height: 1.1;
+  }
+  .portrait #eq { order: 3; flex: 1 1 auto; text-align: center; font-size: 24px; padding-left: 40px; }
+  .portrait #header #help { order: 4; width: 40px; height: 40px; font-size: 20px; border-width: 3px; }
+  .portrait #drow { display: contents; }              /* banner becomes a child of #stage, so it can stick */
+  .portrait #cvD { width: 100%; max-width: 440px; height: 150px; align-self: center; }
+  /* The 8 px white shadow fills the stage padding beside and the gaps around the
+     sticky blocks, so plots scrolling underneath don't show through. */
+  .portrait #banner, .portrait #phasebar { position: sticky; z-index: 2; box-shadow: 0 0 0 8px #FFFFFF; }
+  .portrait #banner { top: 0; flex: none; min-height: 100px; box-sizing: border-box; padding: 6px 12px; }
+  .portrait #b1 { font-size: 24px; white-space: normal; }
+  .portrait #b2 { font-size: 16px; line-height: 1.15; }
+  .portrait #b3 { font-size: 15px; }
+  /* phase bar: title and value on one line, the full-width track under them;
+     its "top" (just under the banner) is set by stick() */
+  .portrait #phasebar { flex-wrap: wrap; height: auto; gap: 0 12px; padding: 6px 12px 0; background: #FFFFFF; }
+  .portrait #phaseHead { flex: 1 1 auto; min-width: 0; }
+  .portrait #phaseTitle { font-size: 20px; }
+  .portrait #phaseSub { font-size: 15px; }
+  .portrait #phaseVal { width: auto; font-size: 40px; }
+  .portrait #track { order: 3; flex: 0 0 calc(100% - 44px); }
+  .portrait #plots { flex-direction: column; flex: none; }
+  .portrait #colL { width: auto; }
+  .portrait .col { gap: 8px; }
+  .portrait .col canvas { flex: none !important; height: 230px; }   /* !important: update() sets cvR1's flex inline */
+  .portrait #cvR1 { height: 300px; }                  /* view 1 phasor */
+  .portrait .v2 #cvR1 { height: 200px; }              /* view 2 |A*B| (no x labels) */
+  .portrait #cvR2 { height: 220px; }
+  .portrait #footer {
+    flex-direction: column; align-items: stretch; height: auto; gap: 14px; padding: 12px 0 16px;
+  }
+  .portrait .slider { flex: none; }
+  .portrait .slider input { height: 32px; }           /* bigger touch target */
+  .portrait .btns button { flex: 1; height: 44px; }
+  .portrait #notes {
+    position: fixed; z-index: 5; padding: 8px; overflow-y: auto; justify-content: center;
+  }
+  .portrait #notes > div { width: auto; padding: 12px 14px; }
 </style>
 </head>
 <body>
@@ -318,7 +379,7 @@ function niceTicks(lo, hi, n) {
 const S = { mode: 1, k: 0.9, link: false, f1: 1000, shape: 'sine', amp: 1, f2: 5000,
   speed: 1, paused: false, ph: { 1: 0, 2: 120 } };
 const sim = new LoopSim();
-let dirty = true, carry = 0, last = performance.now();
+let dirty = true, carry = 0, last = performance.now(), portrait = false;   // portrait: set by fit()
 const $ = id => document.getElementById(id);
 const cv = { d: $('cvD'), pa: $('cvPA'), pb: $('cvPB'), r1: $('cvR1'), r2: $('cvR2') };
 
@@ -368,7 +429,12 @@ function rich(ctx, x, y, s, size, color, align) {       // canvas text with V_{S
 function plot(c, o) {
   const cc = ctxFor(c); if (!cc) return;
   const { ctx, w, h } = cc;
-  const l = 46, r = w - 10, t = 30, b = h - (o.noX ? 8 : 24);
+  const l = 46, r = w - 10, legend = (o.series || []).filter(s => s.label);
+  // the legend sits right of the title; in a narrow plot (portrait layout)
+  // where they would collide it gets a row of its own under the title
+  let lw = 0; legend.forEach(s => { lw += richW(ctx, s.label, 19) + 52; });
+  const legendY = legend.length && r - lw + 16 < l + richW(ctx, o.title, 19) + 16 ? 38 : 14;
+  const t = 30 + legendY - 14, b = h - (o.noX ? 8 : 24);
   const lx = v => o.logx ? Math.log10(Math.max(v, 1e-12)) : v;
   const x0 = lx(o.xr[0]), ax = (r - l) / (lx(o.xr[1]) - x0), y0 = o.yr[0], ay = (b - t) / (o.yr[1] - o.yr[0]);
   const px = v => Math.min(r, Math.max(l, l + (lx(v) - x0) * ax)), py = v => Math.min(b, Math.max(t, b - (v - y0) * ay));
@@ -407,9 +473,9 @@ function plot(c, o) {
   (o.texts || []).forEach(tx => { if (tx.x >= o.xr[0] && tx.x <= o.xr[1]) rich(ctx, px(tx.x) + tx.dx, t + tx.dy, tx.text, 16, tx.color, tx.align); });
   rich(ctx, l, 14, o.title, 19, C.INK, 'left');
   let x = r;
-  (o.series || []).filter(s => s.label).reverse().forEach(s => {
-    x -= richW(ctx, s.label, 19); rich(ctx, x, 14, s.label, 19, s.color, 'left');
-    x -= 6; seg(x - 30, 13, x, 13, s.color, 5, s.dash); x -= 46;
+  legend.reverse().forEach(s => {
+    x -= richW(ctx, s.label, 19); rich(ctx, x, legendY, s.label, 19, s.color, 'left');
+    x -= 6; seg(x - 30, legendY - 1, x, legendY - 1, s.color, 5, s.dash); x -= 46;
   });
 }
 
@@ -451,8 +517,10 @@ function drawStatic() {
   const xr = S.mode === 1 ? BODE_X1 : BODE_X2;
   const f180 = freqForPhase(180, tau), bf = bodeFreqs(xr), mag = bf.map(f => 20 * Math.log10(loopMag(f))), ph = bf.map(f => -loopPhase(f, tau));
   const vlines = [{ x: FC, color: C.MID, dash: DASH }, { x: f180, color: C.DIFF, dash: DASH }, { x: fsig, color: C.VIN }];
-  // view 1: six decades are too tight to label every one at this width
-  const xb = { xr, logx: true, xticks: [1, 10, 100, 1e3, 1e4, 1e5, 1e6, 1e7], xlabels: S.mode === 1 ? [1, 100, 1e4, 1e6] : null, xfmt: fmtFreq, vlines };
+  // view 1: six decades are too tight to label every one at this width; view 2's five
+  // are too, once the plot is narrower than on the desktop stage (portrait layout)
+  const xlabels = S.mode === 1 ? [1, 100, 1e4, 1e6] : cv.r1.clientWidth < 380 ? [1e3, 1e5, 1e7] : null;
+  const xb = { xr, logx: true, xticks: [1, 10, 100, 1e3, 1e4, 1e5, 1e6, 1e7], xlabels, xfmt: fmtFreq, vlines };
   const magPlot = { ...xb, title: '|Aβ|  (dB)', yr: [-50, 50], yticks: [-40, -20, 0, 20, 40], noX: true,
     hlines: [{ y: 0, color: C.MID }], series: [{ xs: bf, ys: mag, color: C.INK, width: 3.5 }],
     texts: [{ x: FC, dx: -8, dy: 16, text: '|Aβ| = 1', color: C.MID, align: 'right' }],
@@ -467,7 +535,10 @@ function drawStatic() {
 
 function drawDiagram() {     // original 400 x 154 geometry scaled 0.73 into 292 x 112
   const cc = ctxFor(cv.d); if (!cc) return;
-  const { ctx } = cc, m = S.mode, u = 0.73, loop = m === 2 ? C.INK : C.OFF, y = 50, fy = 112;
+  const { ctx, w, h } = cc, m = S.mode, loop = m === 2 ? C.INK : C.OFF, y = 50, fy = 112;
+  let u = 0.73;
+  // portrait: as big as the canvas allows (drawing is ~400 x 156), centred
+  if (portrait) { u = Math.min(w / 400, h / 156); ctx.translate((w - 400 * u) / 2, (h - 156 * u) / 2); }
   ctx.scale(u, u); ctx.lineWidth = 3.6;
   const line = (pts, col, arrow) => {
     ctx.strokeStyle = col; ctx.beginPath(); ctx.moveTo(pts[0], pts[1]);
@@ -507,7 +578,9 @@ function drawDiagram() {     // original 400 x 154 geometry scaled 0.73 into 292
 function drawPhasor() {
   const cc = ctxFor(cv.r1); if (!cc) return;
   const { ctx, w, h } = cc, k = S.k, phi = S.ph[1] * Math.PI / 180, top = 30, bot = 26;
-  const sc = Math.min(w / 3.9, (h - top - bot) / 3.15), ox = w / 2 - 0.7 * sc, oy = top + (h - top - bot) / 2;
+  // portrait: narrower, so leave room for the V_DIFF label ~62 px past the
+  // furthest tip (x = 2.5 at k = 1.5); w / 3.9 would clip it on a phone
+  const sc = Math.min(portrait ? (w / 2 - 62) / 1.8 : w / 3.9, (h - top - bot) / 3.15), ox = w / 2 - 0.7 * sc, oy = top + (h - top - bot) / 2;
   const P = (x, y) => [ox + x * sc, oy - y * sc];
   rich(ctx, 4, 14, 'V_{DIFF} = V_{IN} − V_{FB}', 19, C.INK, 'left');
   ctx.beginPath(); ctx.arc(ox, oy, sc, 0, 2 * Math.PI); ctx.fillStyle = C.CIRCLE; ctx.fill();
@@ -571,6 +644,8 @@ function update() {
   $('speedText').textContent = parseFloat(S.speed.toPrecision(2)) + '×';
   $('sine').classList.toggle('on', S.shape === 'sine'); $('square').classList.toggle('on', S.shape === 'square');
   $('pause').textContent = S.paused ? 'Run' : 'Pause';
+  $('stage').classList.toggle('v2', m === 2);         // portrait CSS sizes cvR1 by view
+  stick();
   dirty = true;
 }
 
@@ -618,11 +693,21 @@ window.addEventListener('keydown', e => {
   else if (e.key === 'Escape') showNotes(false);
 }, true);
 
-function fit() {                          // scale the 1024 x 768 stage to the window
+// Layout choice.  Landscape (desktop, projector, phone on its side): scale the
+// 1024 x 768 stage to the window.  Portrait (phone upright, or any window
+// taller than wide): the single-column scrolling layout from the
+// ".portrait" CSS, in unscaled CSS px.  Decided by shape, not by sniffing
+// for "mobile", so a tall desktop window gets the column too.
+function fit() {
+  portrait = window.innerHeight > window.innerWidth;
+  document.documentElement.classList.toggle('portrait', portrait);
   const z = Math.min(window.innerWidth / 1024, window.innerHeight / 768) || 1;
-  $('stage').style.transform = 'scale(' + z + ')';
+  $('stage').style.transform = portrait ? '' : 'scale(' + z + ')';
+  stick();
   dirty = true;
 }
+// portrait: the phase bar sticks just under the banner (the banner can grow a line)
+function stick() { $('phasebar').style.top = portrait ? ($('banner').offsetHeight + 8) + 'px' : ''; }
 window.addEventListener('resize', fit);
 
 function frame(now) {
