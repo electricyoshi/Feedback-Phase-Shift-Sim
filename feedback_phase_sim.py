@@ -1033,7 +1033,9 @@ class App:
                                   size=14, height=26, border=2, width=26)
         self.help_btn.cv.pack(side="right")
         self.eq = tk.Canvas(header, bg=BG, highlightthickness=0, width=1, height=1)
-        self.eq.pack(side="right")
+        # centred in the space between the tabs and "?" (the true stage centre
+        # is under the tabs)
+        self.eq.pack(side="left", expand=True)
 
         # ---- block diagram + status banner -----------------------------------
         self.mid = tk.Frame(main, bg=BG)
@@ -1151,7 +1153,6 @@ class App:
     def _layout(self):
         """Paddings and fixed sizes that depend on Z."""
         self.main.configure(padx=zs(12), pady=zs(12))
-        self.eq.pack_configure(padx=(0, zs(16)))
         self.mid.grid_configure(pady=(zs(8), 0))
         self.diagram.configure(width=zs(292), height=zs(112))
         self.banner.configure(height=zs(112))

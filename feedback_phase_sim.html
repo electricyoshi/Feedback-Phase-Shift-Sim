@@ -33,7 +33,7 @@
   #header { align-items: center; gap: 10px; height: 52px; }
   #header button { height: 52px; padding: 0 18px; border-width: 4px; font-size: 22px; }
   #header #help { width: 26px; height: 26px; padding: 0; font-size: 14px; border-width: 2px; }
-  #eq { font-size: 28px; white-space: nowrap; margin-right: 6px; }
+  #eq { font-size: 28px; white-space: nowrap; }
   #banner {
     flex: 1; min-width: 0; color: #FFFFFF; padding: 6px 18px;
     display: flex; flex-direction: column; justify-content: center; gap: 3px;
@@ -75,8 +75,9 @@
   <div id="header" class="row">
     <button id="tab1" class="on">1 · Summing junction</button>
     <button id="tab2">2 · Closed loop</button>
-    <div style="flex:1"></div>
+    <div style="flex:1"></div>   <!-- equal spacers: equation centred between the tabs and "?" -->
     <div id="eq"><span style="color:#D55E00">V<sub>DIFF</sub></span> = <span style="color:#0072B2">V<sub>IN</sub></span> − βV<sub>OUT</sub></div>
+    <div style="flex:1"></div>
     <button id="help">?</button>
   </div>
 
