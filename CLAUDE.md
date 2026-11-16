@@ -132,5 +132,6 @@ paths and personal details.
 - GitHub Pages is on (legacy build from `main` /), so every push to main redeploys
   https://electricyoshi.github.io/Feedback-Phase-Shift-Sim/feedback_phase_sim.html -
   the link students are given. A broken HTML on main is live within a minute or two.
-- Portrait/phone layout (2026-11-16): verified only in headless Chrome at phone
-  sizes. Not yet checked on a real iPhone (Safari) or Android phone.
+- Portrait/phone layout (2026-11-16): headless Chrome tests pass at phone sizes, and
+  Jon checked it on a real Android phone (Chrome): good. Not yet checked on an
+  iPhone (Safari).
