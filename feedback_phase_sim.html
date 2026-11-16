@@ -58,7 +58,7 @@
   .slider input { width: 100%; margin: 0; height: 18px; accent-color: #111111; }
   canvas { display: block; }
   #notes {
-    position: absolute; inset: 0; background: rgba(255,255,255,.6); display: none;
+    position: absolute; top: 0; right: 0; bottom: 0; left: 0; background: rgba(255,255,255,.6); display: none;
     align-items: flex-start; justify-content: flex-end; padding: 72px 16px 0 0;
   }
   #notes > div {
@@ -119,7 +119,7 @@
         <input id="link" type="checkbox" style="width:26px;height:26px;margin:0;accent-color:#111111">
         <span style="white-space:nowrap">Link phase to frequency</span></label>
       <label class="slider"><span><span>Signal frequency</span><span id="f1Text"></span></span>
-        <input id="f1in" type="range" min="2" max="5.477" step="0.005" value="3"></label>
+        <input id="f1in" type="range" min="0" max="5.48" step="0.005" value="3"></label>
     </div>
     <div id="f2" style="display:none">
       <div style="flex:none;display:flex">
@@ -140,7 +140,19 @@
 
   <div id="notes"><div id="notesBody"></div></div>
 </div>
+<div id="err" style="display:none;position:fixed;left:0;right:0;top:0;z-index:9;padding:10px 14px;background:#B84300;color:#FFFFFF;font:bold 16px Arial, Helvetica, sans-serif"></div>
 
+<script>
+// Fail loudly: if the main script below can't run (very old browser) or hits
+// an error, say so on the page instead of leaving a silently dead layout.
+// Own <script> block and plain old syntax, so it works even when the main
+// script does not parse.
+window.onerror = function (msg, src, line) {
+  var d = document.getElementById('err');
+  d.textContent = 'This page hit an error (' + msg + ', line ' + line + '). Try a current version of Chrome, Edge, Firefox or Safari.';
+  d.style.display = 'block';
+};
+</script>
 <script>
 'use strict';
 // ---------------------------------------------------------------------------
@@ -161,10 +173,27 @@ function freqForPhase(phi, tau) {         // frequency where the lag = phi (null
   return 10 ** hi;
 }
 const TAU_VIEW1 = tauFor(150);            // fixed excess delay for view 1's Bode plot
+// View 1 "Signal frequency" range.  It starts at 1 Hz so that, with the phase
+// linked to the Bode plot, the lag can be brought all the way down to 0 deg
+// (the pole alone still gives 5.7 deg at 100 Hz, 0.06 deg at 1 Hz).
+const F1_MIN = 1, F1_MAX = 3e5;
+const BODE_X1 = [1, 1e6], BODE_X2 = [100, 1e6], BODE_PER_DECADE = 60;   // Bode axis, views 1 / 2
+function bodeFreqs(xr) {
+  const n = Math.round(Math.log10(xr[1] / xr[0]) * BODE_PER_DECADE), out = [];
+  for (let i = 0; i <= n; i++) out.push(xr[0] * 10 ** (i / BODE_PER_DECADE));
+  return out;
+}
+const linkedPhase = f => Math.min(360, loopPhase(f, TAU_VIEW1));   // view 1, phase linked to f
+function view1Ratio(k, phDeg) {           // |V_DIFF| / |V_IN| when V_FB = k * V_IN lagging phDeg
+  const phi = phDeg * Math.PI / 180;
+  return Math.hypot(1 - k * Math.cos(phi), k * Math.sin(phi));
+}
+const timeUnit = span => span >= 2 ? ['s', 1] : span >= 2e-3 ? ['ms', 1e3] : ['µs', 1e6];
 
 // Time-domain closed loop with rail saturation (forward Euler + delay line).
+// (DT/MASK/NOISE are assigned after the class rather than as "static" fields:
+// Safari older than 14.1 stops with a syntax error on static class fields.)
 class LoopSim {
-  static DT = 2.5e-8; static MASK = 1023; static NOISE = 2e-3;
   constructor() { this.reset(); }
   reset() {
     this.t = 0; this.y = 0; this.ph = 0; this.i = 0; this.cnt = 0;
@@ -196,6 +225,7 @@ class LoopSim {
     if (i0 > 200) for (const a of [this.T, this.VIN, this.VOUT, this.VD]) a.splice(0, i0);
   }
 }
+LoopSim.DT = 2.5e-8; LoopSim.MASK = 1023; LoopSim.NOISE = 2e-3;
 function lowerBound(a, v) { let lo = 0, hi = a.length; while (lo < hi) { const m = (lo + hi) >> 1; if (a[m] < v) lo = m + 1; else hi = m; } return lo; }
 
 // ---------------------------------------------------------------------------
@@ -224,8 +254,26 @@ const NOTES = [
   ['Keys',
    '• ← / →  nudge the phase 1°  (Shift: 10°)\n' +
    '• Space  pause / run\n' +
-   '• F11  full screen    Esc  close these notes'],
+   '• F11  full screen  (Mac: Ctrl+Cmd+F)    Esc  close these notes'],
 ];
+
+// Banner text (mirrors view1_status / view2_status in the Python; the sizes live in the CSS)
+function view1Status(k, phDeg) {
+  const ratio = view1Ratio(k, phDeg), b1 = '|V_{DIFF}| = ' + ratio.toFixed(2) + ' × |V_{IN}|';
+  if (ratio < 0.995) return { bg: C.GOOD, lines: [b1, 'Negative feedback — the difference shrinks'] };
+  if (ratio > 1.005) return { bg: C.BAD, lines: [b1, 'Positive feedback — the difference grows'] };
+  return { bg: C.MID, lines: [b1, 'Rotated, but not shrunk'] };
+}
+function view2Status(phDeg) {             // phDeg = lag of A*B at crossover
+  const pm = 180 - phDeg, f180 = freqForPhase(180, tauFor(phDeg)), gm = f180 ? -20 * Math.log10(loopMag(f180)) : null;
+  let bg, msg;
+  if (pm > 0.5) { bg = C.GOOD; msg = pm >= 45 ? 'Stable — ringing dies out' : 'Stable, but barely — heavy ringing'; }
+  else if (pm < -0.5) { bg = C.BAD; msg = 'Unstable — grows until it hits the ±' + VCC + ' V rails'; }
+  else { bg = C.MID; msg = 'On the edge — sustained oscillation'; }
+  const lines = ['Phase margin ' + (pm > 0 ? '+' : pm < 0 ? '−' : '') + Math.abs(pm).toFixed(0) + '°', msg];
+  if (gm != null) lines.push('Gain margin ' + (gm >= 0 ? '+' : '−') + Math.abs(gm).toFixed(1) + ' dB');
+  return { bg, lines };
+}
 
 // ---------------------------------------------------------------------------
 // Formatting and V_{SUB} markup
@@ -259,13 +307,13 @@ function setPhase(v) {
   const [lo, hi] = range();
   v = Math.min(hi, Math.max(lo, Math.round(v)));
   if (S.mode === 1 && S.link) {
-    S.f1 = Math.min(3e5, Math.max(100, freqForPhase(v, TAU_VIEW1) || 3e5));
+    S.f1 = Math.min(F1_MAX, Math.max(F1_MIN, freqForPhase(v, TAU_VIEW1) || F1_MAX));
     linkPhaseToF1();
   } else S.ph[S.mode] = v;
   update();
 }
 // phase follows the Bode plot at f1 (rounded to the 1 deg step, like the Python slider)
-function linkPhaseToF1() { S.ph[1] = Math.round(Math.min(360, loopPhase(S.f1, TAU_VIEW1))); }
+function linkPhaseToF1() { S.ph[1] = Math.round(linkedPhase(S.f1)); }
 
 // ---------------------------------------------------------------------------
 // Canvas helpers
@@ -309,7 +357,7 @@ function plot(c, o) {
   xt.forEach((v, i) => {
     const p = px(v);
     seg(p, t, p, b, C.GRID, 2);
-    if (o.noX) return;
+    if (o.noX || (o.xlabels && !o.xlabels.includes(v))) return;
     const txt = (o.xfmt || fmtNum)(v) + (i === xt.length - 1 && o.xunit ? ' ' + o.xunit : '');
     ctx.font = font(15); ctx.fillStyle = C.INK; ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
     const tw = ctx.measureText(txt).width;
@@ -351,7 +399,7 @@ function plot(c, o) {
 function drawTime() {
   if (S.mode === 1) {
     const k = S.k, f = S.f1, phi = S.ph[1] * Math.PI / 180, n = 300, span = 2.5 / f;
-    const unit = span >= 2e-3 ? 'ms' : 'µs', mul = span >= 2e-3 ? 1e3 : 1e6;
+    const [unit, mul] = timeUnit(span);
     const xs = [], vin = [], vfb = [], vd = [];
     for (let i = 0; i <= n; i++) {
       const th = 2 * Math.PI * 2.5 * i / n;
@@ -380,10 +428,11 @@ function drawStatic() {
   drawDiagram();
   const tau = S.mode === 1 ? TAU_VIEW1 : tauFor(S.ph[2]);
   const fsig = S.mode === 1 ? (S.link ? S.f1 : null) : S.f2;
-  const f180 = freqForPhase(180, tau), bf = [], mag = [], ph = [];
-  for (let i = 0; i <= 240; i++) { const f = 10 ** (2 + 4 * i / 240); bf.push(f); mag.push(20 * Math.log10(loopMag(f))); ph.push(-loopPhase(f, tau)); }
+  const xr = S.mode === 1 ? BODE_X1 : BODE_X2;
+  const f180 = freqForPhase(180, tau), bf = bodeFreqs(xr), mag = bf.map(f => 20 * Math.log10(loopMag(f))), ph = bf.map(f => -loopPhase(f, tau));
   const vlines = [{ x: FC, color: C.MID, dash: DASH }, { x: f180, color: C.DIFF, dash: DASH }, { x: fsig, color: C.VIN }];
-  const xb = { xr: [100, 1e6], logx: true, xticks: [100, 1e3, 1e4, 1e5, 1e6], xfmt: fmtFreq, vlines };
+  // view 1: six decades are too tight to label every one at this width
+  const xb = { xr, logx: true, xticks: [1, 10, 100, 1e3, 1e4, 1e5, 1e6], xlabels: S.mode === 1 ? [1, 100, 1e4, 1e6] : null, xfmt: fmtFreq, vlines };
   const magPlot = { ...xb, title: '|Aβ|  (dB)', yr: [-30, 50], yticks: [-20, 0, 20, 40], noX: true,
     hlines: [{ y: 0, color: C.MID }], series: [{ xs: bf, ys: mag, color: C.INK, width: 3.5 }],
     texts: [{ x: FC, dx: -8, dy: 16, text: '|Aβ| = 1', color: C.MID, align: 'right' }],
@@ -476,21 +525,8 @@ function drawPhasor() {
 // ---------------------------------------------------------------------------
 function update() {
   const m = S.mode, ph = S.ph[m], [lo, hi] = range();
-  let bg, b1, b2, b3 = '';
-  if (m === 1) {
-    const phi = ph * Math.PI / 180, ratio = Math.hypot(1 - S.k * Math.cos(phi), S.k * Math.sin(phi));
-    b1 = '|V_{DIFF}| = ' + ratio.toFixed(2) + ' × |V_{IN}|';
-    if (ratio < 0.995) { bg = C.GOOD; b2 = 'Negative feedback — the difference shrinks'; }
-    else if (ratio > 1.005) { bg = C.BAD; b2 = 'Positive feedback — the difference grows'; }
-    else { bg = C.MID; b2 = 'Rotated, but not shrunk'; }
-  } else {
-    const pm = 180 - ph, f180 = freqForPhase(180, tauFor(ph)), gm = f180 ? -20 * Math.log10(loopMag(f180)) : null;
-    b1 = 'Phase margin ' + (pm > 0 ? '+' : pm < 0 ? '−' : '') + Math.abs(pm).toFixed(0) + '°';
-    if (pm > 0.5) { bg = C.GOOD; b2 = pm >= 45 ? 'Stable — ringing dies out' : 'Stable, but barely — heavy ringing'; }
-    else if (pm < -0.5) { bg = C.BAD; b2 = 'Unstable — grows until it hits the ±' + VCC + ' V rails'; }
-    else { bg = C.MID; b2 = 'On the edge — sustained oscillation'; }
-    if (gm != null) b3 = 'Gain margin ' + (gm >= 0 ? '+' : '−') + Math.abs(gm).toFixed(1) + ' dB';
-  }
+  const st = m === 1 ? view1Status(S.k, ph) : view2Status(ph);
+  const bg = st.bg, b1 = st.lines[0], b2 = st.lines[1], b3 = st.lines[2] || '';
   $('banner').style.background = bg;
   $('b1').innerHTML = subHtml(b1); $('b2').textContent = b2; $('b3').textContent = b3;
   $('b3').style.display = b3 ? '' : 'none';
@@ -532,7 +568,7 @@ $('tab1').onclick = () => setMode(1);
 $('tab2').onclick = () => setMode(2);
 $('k').oninput = e => { S.k = +e.target.value; update(); };
 $('link').onchange = e => { S.link = e.target.checked; if (S.link) linkPhaseToF1(); update(); };
-$('f1in').oninput = e => { S.f1 = Math.min(3e5, 10 ** +e.target.value); if (S.link) linkPhaseToF1(); update(); };
+$('f1in').oninput = e => { S.f1 = Math.min(F1_MAX, Math.max(F1_MIN, 10 ** +e.target.value)); if (S.link) linkPhaseToF1(); update(); };
 $('amp').oninput = e => { S.amp = +e.target.value; update(); };
 $('f2in').oninput = e => { S.f2 = 10 ** +e.target.value; update(); };
 $('speed').oninput = e => { S.speed = 10 ** +e.target.value; update(); };
@@ -586,8 +622,9 @@ function frame(now) {
   }
   if (dirty) { dirty = false; drawStatic(); if (S.mode === 1) drawTime(); }
 }
+if (location.hash === '#2') S.mode = 2;   // feedback_phase_sim.html#2 opens straight in view 2
 fit(); update();
-requestAnimationFrame(frame);
+frame(performance.now());                 // first draw right now; it books the following frames itself
 </script>
 </body>
 </html>

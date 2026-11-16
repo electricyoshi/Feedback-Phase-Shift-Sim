@@ -71,6 +71,36 @@ def freq_for_phase(phi_deg, tau):
 
 # Fixed excess delay used for the Bode plot in view 1 (150 deg at crossover).
 TAU_VIEW1 = tau_for_crossover_phase(150.0)
+# View 1 "Signal frequency" range.  It starts at 1 Hz so that, with the phase
+# linked to the Bode plot, the lag can be brought all the way down to 0 deg
+# (the pole alone still gives 5.7 deg at 100 Hz, 0.06 deg at 1 Hz).
+F1_MIN, F1_MAX = 1.0, 3.0e5
+BODE_X1 = (1.0, 1.0e6)      # Bode frequency axis in view 1 (covers F1_MIN)
+BODE_X2 = (100.0, 1.0e6)    # ... and in view 2
+BODE_PER_DECADE = 60        # points per decade on the Bode curves
+
+
+def bode_freqs(xr):
+    n = int(round(math.log10(xr[1] / xr[0]) * BODE_PER_DECADE))
+    return [xr[0] * 10 ** (i / float(BODE_PER_DECADE)) for i in range(n + 1)]
+
+
+def linked_phase(f):
+    """View 1 with "Link phase to frequency": the lag of A*B at f, deg."""
+    return min(360.0, loop_phase(f, TAU_VIEW1))
+
+
+def view1_ratio(k, ph_deg):
+    """|V_DIFF| / |V_IN| at the summer when V_FB = k * V_IN lagging ph_deg."""
+    phi = math.radians(ph_deg)
+    return math.hypot(1 - k * math.cos(phi), k * math.sin(phi))
+
+
+def time_unit(span):
+    """(unit, multiplier) for a time axis that is span seconds wide."""
+    if span >= 2.0:
+        return "s", 1.0
+    return ("ms", 1e3) if span >= 2e-3 else ("µs", 1e6)
 
 
 class LoopSim:
@@ -222,7 +252,10 @@ def nice_ticks(lo, hi, n=6):
 
 
 def fmt_num(v):
-    return ("%.3g" % v).replace("-", "−")
+    s = "%.3g" % v
+    if "e" in s:                # 2000 -> "2e+03": write it out instead
+        s = "%g" % float(s)
+    return s.replace("-", "−")
 
 
 def fmt_freq(f):
@@ -328,6 +361,7 @@ class Plot:
         self.xr, self.yr = xrange, yrange
         self.logx, self.xticks, self.yticks = logx, xticks, yticks
         self.xfmt, self.show_x = xfmt, show_x
+        self.xlabels = None       # label only these x ticks (None = all of them)
         self.hlines = []          # (y, color, text, text_below_line)
         self.series = {}          # name -> dict
         self.dyn = {}             # name -> (kind, kwargs)
@@ -527,7 +561,7 @@ class Plot:
         for i, v in enumerate(xt):
             p = self.px(v)
             cv.create_line(p, t, p, b, fill=C_GRID, width=2 * Z, tags=st)
-            if self.show_x:
+            if self.show_x and (self.xlabels is None or v in self.xlabels):
                 # the unit rides on the last tick label instead of an axis title
                 txt = self.xfmt(v)
                 if i == len(xt) - 1 and self.xunit:
@@ -895,6 +929,40 @@ NOTES = (
 )
 
 
+def view1_status(k, ph_deg):
+    """Banner for view 1: (colour, [(markup, stage px, line height), ...])."""
+    ratio = view1_ratio(k, ph_deg)
+    if ratio < 0.995:
+        color, msg = C_GOOD, "Negative feedback — the difference shrinks"
+    elif ratio > 1.005:
+        color, msg = C_BAD, "Positive feedback — the difference grows"
+    else:
+        color, msg = C_MID, "Rotated, but not shrunk"
+    return color, [("|V_{DIFF}| = %.2f × |V_{IN}|" % ratio, 36, 1.25), (msg, 22, 1.1)]
+
+
+def view2_status(ph_deg):
+    """Banner for view 2 (ph_deg = lag of A*B at crossover), as view1_status."""
+    pm = 180.0 - ph_deg
+    f180 = freq_for_phase(180.0, tau_for_crossover_phase(ph_deg))
+    gm = -20 * math.log10(loop_mag(f180)) if f180 else None
+    if pm > 0.5:
+        color = C_GOOD
+        msg = ("Stable — ringing dies out" if pm >= 45
+               else "Stable, but barely — heavy ringing")
+    elif pm < -0.5:
+        color = C_BAD
+        msg = "Unstable — grows until it hits the ±%g V rails" % VCC
+    else:
+        color, msg = C_MID, "On the edge — sustained oscillation"
+    sign = "+" if pm > 0 else "−" if pm < 0 else ""
+    lines = [("Phase margin %s%.0f°" % (sign, abs(pm)), 36, 1.15), (msg, 22, 1.1)]
+    if gm is not None:
+        lines.append(("Gain margin %s%.1f dB" % ("+" if gm >= 0 else "−", abs(gm)),
+                      18, 1.1))
+    return color, lines
+
+
 class App:
     SWEEP_S = 6.0     # real seconds for one screen-width of simulated time
 
@@ -981,8 +1049,8 @@ class App:
         right.columnconfigure(0, weight=1)
         self.phasor = tk.Canvas(right, bg=BG, highlightthickness=0, width=10, height=10)
         self.phasor.bind("<Configure>", lambda e: self.draw_phasor())
-        bode = dict(xrange=(100, 1e6), logx=True, xfmt=fmt_freq,
-                    xticks=[100, 1e3, 1e4, 1e5, 1e6])
+        bode = dict(xrange=BODE_X2, logx=True, xfmt=fmt_freq,
+                    xticks=[1, 10, 100, 1e3, 1e4, 1e5, 1e6])
         self.bm = Plot(right, title="|Aβ|  (dB)", yrange=(-30, 50),
                        yticks=[-20, 0, 20, 40], show_x=False, **bode)
         self.bp = Plot(right, title="Phase of Aβ  (°)", yrange=(-360, 0), xunit="Hz",
@@ -991,7 +1059,7 @@ class App:
         self.bp.hlines = [(-180, C_DIFF, "", False)]
         self.bm.add_series("mag", C_INK, width=3.5)
         self.bp.add_series("ph", C_INK, width=3.5)
-        self.bode_f = [10 ** (2 + 4 * i / 240.0) for i in range(241)]
+        self.bode_f1, self.bode_f = bode_freqs(BODE_X1), bode_freqs(BODE_X2)
         self.bm.set_data("mag", self.bode_f, [20 * math.log10(loop_mag(f)) for f in self.bode_f])
 
         # ---- footer: per-view controls ---------------------------------------
@@ -1008,7 +1076,7 @@ class App:
                           lambda v: "%.2f" % v, ch, step=0.01)
         self.cb_link = CheckBox(self.f1, "Link phase to frequency", self.link,
                                 self.link_toggled)
-        self.s_f1 = Slider(self.f1, "Signal frequency", 100.0, 3e5, 1e3, fmt_hz,
+        self.s_f1 = Slider(self.f1, "Signal frequency", F1_MIN, F1_MAX, 1e3, fmt_hz,
                            self.freq1_changed, log=True)
 
         self.f2 = tk.Frame(self.footer_row, bg=BG)
@@ -1195,6 +1263,9 @@ class App:
             pa.style("vfb", 3.0, (11, 7), "V_{FB}")
             pb.style("vin", 2.5)
             pb.style("vd", 4.0)
+            # six decades are too tight to label every one at this width
+            self.bp.xlabels = (1, 100, 1e4, 1e6)
+            self.bp.configure(xrange=BODE_X1)
         else:
             self.s_phase.set_range(95.0, 270.0)
             self.s_phase.set_sub("of Aβ where |Aβ| = 1")
@@ -1207,6 +1278,8 @@ class App:
             pa.style("vd", 3.0)
             pb.style("vin", 2.5)
             pb.style("vout", 3.5)
+            self.bp.xlabels = None
+            self.bp.configure(xrange=BODE_X2)
             self.span2 = None
             self.restart()
         pa.fast = pb.fast = (m == 2)
@@ -1229,8 +1302,7 @@ class App:
             self.busy = True
             f = freq_for_phase(ph, TAU_VIEW1) or self.s_f1.hi
             self.s_f1.set(f)
-            ph = min(360.0, loop_phase(self.s_f1.get(), TAU_VIEW1))
-            self.s_phase.set(ph)
+            self.s_phase.set(linked_phase(self.s_f1.get()))
             self.busy = False
         self.phase_by_mode[m] = self.s_phase.get()
         self.dirty = True
@@ -1240,7 +1312,7 @@ class App:
             return
         if self.link.get():
             self.busy = True
-            self.s_phase.set(min(360.0, loop_phase(self.s_f1.get(), TAU_VIEW1)))
+            self.s_phase.set(linked_phase(self.s_f1.get()))
             self.phase_by_mode[1] = self.s_phase.get()
             self.busy = False
         self.dirty = True
@@ -1439,11 +1511,10 @@ class App:
             k = self.s_k.get()
             f = self.s_f1.get()
             phi = math.radians(ph)
-            ratio = math.hypot(1 - k * math.cos(phi), k * math.sin(phi))
             n = 300
             th = [2 * math.pi * 2.5 * i / n for i in range(n + 1)]
             span = 2.5 / f
-            unit, mul = ("ms", 1e3) if span >= 2e-3 else ("µs", 1e6)
+            unit, mul = time_unit(span)
             xs = [t / (2 * math.pi * f) * mul for t in th]
             vin = [math.sin(t) for t in th]
             vfb = [k * math.sin(t - phi) for t in th]
@@ -1457,41 +1528,18 @@ class App:
             self.pb.set_data("vin", xs, vin)
             self.pb.set_data("vd", xs, vd)
             self.draw_phasor()
-            if ratio < 0.995:
-                color, msg = C_GOOD, "Negative feedback — the difference shrinks"
-            elif ratio > 1.005:
-                color, msg = C_BAD, "Positive feedback — the difference grows"
-            else:
-                color, msg = C_MID, "Rotated, but not shrunk"
-            self.banner_state = (color, [("|V_{DIFF}| = %.2f × |V_{IN}|" % ratio, 36, 1.25),
-                                         (msg, 22, 1.1)])
+            self.banner_state = view1_status(k, ph)
             self.s_phase.set_alert(ph >= 180)
             tau, fsig = TAU_VIEW1, (f if self.link.get() else None)
         else:
             tau = tau_for_crossover_phase(ph)
-            pm = 180.0 - ph
-            f180 = freq_for_phase(180.0, tau)
-            gm = -20 * math.log10(loop_mag(f180)) if f180 else None
-            if pm > 0.5:
-                color = C_GOOD
-                msg = ("Stable — ringing dies out" if pm >= 45
-                       else "Stable, but barely — heavy ringing")
-            elif pm < -0.5:
-                color = C_BAD
-                msg = "Unstable — grows until it hits the ±%g V rails" % VCC
-            else:
-                color, msg = C_MID, "On the edge — sustained oscillation"
-            sign = "+" if pm > 0 else "−" if pm < 0 else ""
-            lines = [("Phase margin %s%.0f°" % (sign, abs(pm)), 36, 1.15), (msg, 22, 1.1)]
-            if gm is not None:
-                lines.append(("Gain margin %s%.1f dB" % ("+" if gm >= 0 else "−", abs(gm)),
-                              18, 1.1))
-            self.banner_state = (color, lines)
+            self.banner_state = view2_status(ph)
             self.s_phase.set_alert(ph > 180)
             fsig = self.s_f2.get()
         self.draw_banner()
         # Bode plots
-        self.bp.set_data("ph", self.bode_f, [-loop_phase(f, tau) for f in self.bode_f])
+        fs = self.bode_f1 if m == 1 else self.bode_f
+        self.bp.set_data("ph", fs, [-loop_phase(f, tau) for f in fs])
         f180 = freq_for_phase(180.0, tau)
         for p in (self.bm, self.bp):
             p.put("fc", "vline", x=FC, color=C_MID, dash=DASH)

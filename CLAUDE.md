@@ -15,21 +15,40 @@ paths and personal details.
 - Known, accepted differences: browser draws dashes natively (no `dashed_line()`
   workaround needed); browser F11 is the browser's own full screen; sliders are native
   `<input type=range>` (log sliders step 0.005 decades vs continuous in Tk).
-- **Parity:** must match exactly - model constants (A0, BETA, FP, VCC, TAU_VIEW1),
-  LoopSim (DT, MASK, NOISE, half-sample correction, rec/trim), phase ranges/defaults
-  (0-360 @0, 95-270 @120), slider ranges/steps/defaults, banner thresholds and copy,
-  plot titles/ticks/units, palette and stage-px sizes.
-- **Planned (not written yet): parity tests** in the test suite. Likely shape: run
-  the HTML's pure functions (loop math, `LoopSim`, banner text, formatters) under
-  node or a headless browser and compare against the Python on a grid of inputs;
-  compare constants/strings by extraction. `LoopSim` noise uses `random`/`Math.random`,
-  so it will need an injectable/seeded noise source (or NOISE=0) to compare traces.
-  Optional later: screenshot comparison of the two UIs at 1024x768.
+- **Parity:** must match exactly - model constants (A0, BETA, FP, VCC, TAU_VIEW1,
+  F1_MIN/F1_MAX, BODE_X1/BODE_X2), LoopSim (DT, MASK, NOISE, half-sample correction,
+  rec/trim), phase ranges/defaults (0-360 @0, 95-270 @120), slider ranges/steps/
+  defaults, banner thresholds and copy, plot titles/ticks/units, palette and stage-px
+  sizes. Enforced by `tests/test_parity.py` for everything except layout/drawing.
+- **Testable logic lives in pure module-level functions**, same names in both files
+  (`view1_status`/`view1Status`, `view2_status`, `view1_ratio`, `linked_phase`,
+  `time_unit`, `bode_freqs`, formatters). Put new numbers/wording there, not inside
+  `App.refresh` / `update()`, or the tests can't see them.
+- **View 1 signal frequency is 1 Hz - 300 kHz** so the linked phase reaches 0 deg
+  (pole alone is 5.7 deg at 100 Hz). View 1's Bode axis is therefore 1 Hz - 1 MHz
+  with every other decade labelled (`xlabels`); view 2 keeps 100 Hz - 1 MHz.
+
+## Tests (`py -m unittest discover -s tests -v`, stdlib unittest)
+- `test_model.py` - Python physics vs textbook formulas, incl. LoopSim steady-state
+  gain vs |A/(1+AB)| (1 % tolerance; catches a lost half-sample correction).
+- `test_parity.py` - runs the HTML's script via `tests/js_harness.mjs` (stub DOM)
+  under node or deno; **skipped if neither is on PATH**. Sim traces are compared
+  with NOISE = 0 and a square wave (no sin(), so bit-exact).
+- `test_html_portable.py` - static: one self-contained file, no network, no syntax
+  newer than Safari 14 (no static class fields, `?.`, `??`, CSS `inset`). Browser:
+  headless Chrome/Edge `--dump-dom` from `file://`, both views (`#2` = view 2),
+  checks the `#err` bar is empty and every canvas was drawn. Skipped with no browser.
+- Headless Chrome often runs no animation frames before dumping, so the page draws
+  its first frame synchronously (`frame(performance.now())` at the end of the
+  script). Don't change that back to `requestAnimationFrame(frame)`.
+- Not covered: pixel layout, Tk drawing, Safari/Firefox (not installed on the dev PC).
 
 ## Commands
 - `Feedback Phase Sim.bat` — double-click launcher (no console window).
 - `py feedback_phase_sim.py` — run with a console (use this to see tracebacks).
-- `feedback_phase_sim.html` — open in a browser (F12 console for errors).
+- `feedback_phase_sim.html` — open in a browser (`...html#2` starts in view 2). A JS
+  error shows as a red bar at the top of the page (`window.onerror` -> `#err`).
+- `py -m unittest discover -s tests -v` — run before every commit.
 
 ## Non-obvious decisions
 - Launcher uses `start "" pyw ...`: without `start`, cmd waits on the GUI and leaves an
