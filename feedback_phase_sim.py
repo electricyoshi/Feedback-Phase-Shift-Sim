@@ -20,6 +20,7 @@ Runs on the Python standard library only (tkinter).  Python 3.8+.
 import bisect
 import math
 import random
+import re
 import time
 import tkinter as tk
 import tkinter.font as tkfont
@@ -171,6 +172,60 @@ def nice_ticks(lo, hi, n=6):
 
 def fmt_num(v):
     return ("%.3g" % v).replace("-", "−")
+
+
+# --------------------------------------------------------------------------
+# Subscripts.  UI strings use a tiny markup, "V_{DIFF}", for a subscript.
+# Unicode has no uppercase subscript letters and Tk labels can't mix font
+# sizes, so subscripts are drawn as separate runs in a smaller, lowered font:
+# draw_rich() on canvases, RichText for text in the control panels.
+# --------------------------------------------------------------------------
+SUB_RE = re.compile(r"_\{([^}]*)\}")
+_sub_fonts = {}
+
+
+def rich_parts(markup):
+    """'V_{DIFF} = x' -> [('V', False), ('DIFF', True), (' = x', False)]"""
+    return [(p, i % 2 == 1) for i, p in enumerate(SUB_RE.split(markup)) if p]
+
+
+def sub_font(font):
+    key = str(font)
+    if key not in _sub_fonts:
+        a = font.actual()
+        size = int(round(a["size"] * 0.72))       # negative size = pixels in Tk
+        if abs(size) < 6:
+            size = 6 if size >= 0 else -6
+        _sub_fonts[key] = tkfont.Font(family=a["family"], size=size,
+                                      weight=a["weight"], slant=a["slant"])
+    return _sub_fonts[key]
+
+
+def sub_drop(font):
+    """How far a subscript's baseline sits below the main baseline, px."""
+    return int(round(font.metrics("ascent") * 0.28))
+
+
+def rich_width(font, markup):
+    return sum((sub_font(font) if sub else font).measure(t)
+               for t, sub in rich_parts(markup))
+
+
+def draw_rich(cv, x, y, markup, font, fill, anchor="center", tags=()):
+    """Canvas create_text() that understands V_{SUB} (single line only)."""
+    w = rich_width(font, markup)
+    if anchor == "center":      # its letters include "n" and "e" - not a compass point
+        anchor = ""
+    asc, h = font.metrics("ascent"), font.metrics("linespace")
+    left = x if "w" in anchor else x - w if "e" in anchor else x - w / 2
+    top = y if "n" in anchor else y - h if "s" in anchor else y - h / 2
+    base, sf, drop = top + asc, sub_font(font), sub_drop(font)
+    for text, sub in rich_parts(markup):
+        f = sf if sub else font
+        # anchor "sw" puts the bottom of the line box (baseline + descent) at y
+        cv.create_text(left, base + (drop if sub else 0) + f.metrics("descent"),
+                       text=text, anchor="sw", font=f, fill=fill, tags=tags)
+        left += f.measure(text)
 
 
 def fmt_freq(f):
@@ -351,20 +406,18 @@ class Plot:
             cv.create_line(l, q, r, q, fill=color, dash=dash, width=1.5 * S,
                            tags="static")
             if text:
-                cv.create_text(l + 5 * S, q - 2 * S, text=text, anchor="sw", font=fs,
-                               fill=color, tags="static")
+                draw_rich(cv, l + 5 * S, q - 2 * S, text, fs, color, "sw", "static")
         cv.create_rectangle(l, t, r, b, outline=C_AXIS, tags="static")
-        cv.create_text(l, t - 5 * S, text=self.title, anchor="sw", font=self.f_bold,
-                       fill="#222", tags="static")
+        draw_rich(cv, l, t - 5 * S, self.title, self.f_bold, "#222", "sw", "static")
         if self.xlabel:
             cv.create_text((l + r) / 2, b + 19 * S, text=self.xlabel, anchor="n",
                            font=fs, fill=C_AXIS, tags="static")
         x = r
         for s in reversed(list(self.series.values())):
             if s["visible"] and s["label"]:
-                x -= self.f_bold.measure(s["label"])
-                cv.create_text(x, t - 5 * S, text=s["label"], anchor="sw",
-                               font=self.f_bold, fill=s["color"], tags="static")
+                x -= rich_width(self.f_bold, s["label"])
+                draw_rich(cv, x, t - 5 * S, s["label"], self.f_bold, s["color"],
+                          "sw", "static")
                 x -= 5 * S
                 cv.create_line(x - 20 * S, t - 13 * S, x, t - 13 * S, fill=s["color"],
                                width=3 * S, dash=s["dash"], tags="static")
@@ -384,7 +437,7 @@ class Slider:
         self.frame = ttk.Frame(parent)
         head = ttk.Frame(self.frame)
         head.pack(fill="x")
-        self.label = ttk.Label(head, text=text, font=big)
+        self.label = RichText(head, big or tkfont.nametofont("TkDefaultFont"), text)
         self.label.pack(side="left")
         self.value = tk.Label(head, font=big or bold, bg=parent_bg(parent))
         self.value.pack(side="right")
@@ -412,7 +465,7 @@ class Slider:
         self.lo, self.hi = lo, hi
         self.scale.configure(from_=self._pos(lo), to=self._pos(hi))
         if text:
-            self.label.configure(text=text)
+            self.label.set(text)
 
     def _show(self):
         self.value.configure(text=self.fmt(self.get()))
@@ -429,23 +482,75 @@ def parent_bg(widget):
         return "#f0f0f0"
 
 
+class RichText(tk.Frame):
+    """Read-only label that understands V_{SUB} markup.
+
+    A tk.Text does the drawing (its tags can change font and baseline offset,
+    which a Label can't).  It sits in a fixed-size Frame sized to the text's
+    real pixel height, because a Text's own height is counted in whole lines
+    of the main font and would clip a subscript hanging below the last line.
+    wrap_px=None: one line per \\n, sized to fit.  wrap_px=N: word-wrapped,
+    N pixels wide.  wrap_px=0: word-wrapped to whatever width it is packed to.
+    """
+
+    def __init__(self, parent, font, markup="", fg="#000", wrap_px=None):
+        bg = parent_bg(parent)
+        super().__init__(parent, bg=bg, width=max(1, wrap_px or 1), height=1)
+        self.pack_propagate(False)
+        self.font, self.wrap_px, self._markup = font, wrap_px, None
+        self.text = tk.Text(self, font=font, fg=fg, bg=bg, bd=0, relief="flat",
+                            highlightthickness=0, padx=0, pady=0, width=1, height=1,
+                            wrap="none" if wrap_px is None else "word",
+                            cursor="arrow", takefocus=0, exportselection=False)
+        self.text.tag_configure("sub", font=sub_font(font), offset=-sub_drop(font))
+        # drop the Text class bindings: no caret, selection or typing
+        self.text.bindtags((str(self.text), "all"))
+        self.text.pack(fill="both", expand=True)
+        self.text.bind("<Configure>", lambda e: self._fit())
+        self.set(markup)
+
+    def set(self, markup, fg=None):
+        if fg:
+            self.text.configure(fg=fg)
+        if markup == self._markup:
+            return
+        self._markup = markup
+        t = self.text
+        t.configure(state="normal")
+        t.delete("1.0", "end")
+        for s, sub in rich_parts(markup):
+            t.insert("end", s, ("sub",) if sub else ())
+        t.configure(state="disabled")
+        if self.wrap_px is None:
+            w = max([rich_width(self.font, ln) for ln in markup.split("\n")] + [1])
+            self.configure(width=int(w) + 2)
+        self._fit()
+
+    def _fit(self):
+        n = self.text.count("1.0", "end", "update", "ypixels")
+        n = n[0] if isinstance(n, tuple) else n
+        h = max(n or 0, self.font.metrics("linespace"))
+        if h != int(self.cget("height")):
+            self.configure(height=h)
+
+
 # --------------------------------------------------------------------------
 # Application
 # --------------------------------------------------------------------------
-HELP1 = ("The feedback signal here is just a copy of Vin with its own size and "
+HELP1 = ("The feedback signal here is just a copy of V_{IN} with its own size and "
          "phase lag - no loop yet.\n\n"
-         "• 0°: it subtracts, so Vdiff is small.\n"
+         "• 0°: it subtracts, so V_{DIFF} is small.\n"
          "• Toward 180°: it cancels less and less.\n"
          "• At 180°: the subtraction has become an addition.\n\n"
-         "In the phasor view, any time the tip of Vdiff is outside the dashed "
-         "circle, feedback has made Vdiff bigger than Vin.")
-HELP2 = ("Now Vdiff drives amplifier A (gain 200, ±5 V rails) and "
+         "In the phasor view, any time the tip of V_{DIFF} is outside the dashed "
+         "circle, feedback has made V_{DIFF} bigger than V_{IN}.")
+HELP2 = ("Now V_{DIFF} drives amplifier A (gain 200, ±5 V rails) and "
          "β = 0.5 feeds the output back.\n\n"
          "The slider sets the phase lag of Aβ at the frequency where "
          "|Aβ| = 1.\n\n"
          "• Use a square wave to see ringing grow as you approach 180°.\n"
          "• Go past 180° and wait.\n"
-         "• Set Vin to 0: it oscillates on its own.")
+         "• Set V_{IN} to 0: it oscillates on its own.")
 
 
 class App:
@@ -454,7 +559,8 @@ class App:
     def __init__(self, root):
         global S
         self.root = root
-        root.title("Feedback & Phase Shift  —  Vᵈᵢᶠᶠ = Vin − βVout")
+        # The OS title bar is plain text (no subscripts), so no equation here.
+        root.title("Feedback & Phase Shift")
         S = max(1.0, root.winfo_fpixels("1i") / 96.0)
         base = tkfont.nametofont("TkDefaultFont")
         fam = base.actual("family")
@@ -496,7 +602,7 @@ class App:
 
         ch = self.changed
         self.f1 = ttk.Frame(cp)
-        self.s_k = Slider(self.f1, "Feedback size  |Vfb| / |Vin|", 0.0, 1.5, 0.9,
+        self.s_k = Slider(self.f1, "Feedback size  |V_{FB}| / |V_{IN}|", 0.0, 1.5, 0.9,
                           lambda v: "%.2f" % v, ch, step=0.01, bold=self.f_bold)
         self.s_k.frame.pack(fill="x", pady=4)
         ttk.Checkbutton(self.f1, text="Link phase to frequency\n(follow the Bode plot)",
@@ -505,8 +611,7 @@ class App:
                            lambda v: fmt_freq(float("%.3g" % v)) + "Hz", self.freq1_changed,
                            log=True, bold=self.f_bold)
         self.s_f1.frame.pack(fill="x", pady=4)
-        ttk.Label(self.f1, text=HELP1, wraplength=wrap, justify="left",
-                  font=self.f_small).pack(anchor="w", pady=(12, 0))
+        RichText(self.f1, self.f_small, HELP1, wrap_px=wrap).pack(anchor="w", pady=(12, 0))
 
         self.f2 = ttk.Frame(cp)
         row = ttk.Frame(self.f2)
@@ -514,10 +619,10 @@ class App:
         ttk.Label(row, text="Input:").pack(side="left")
         for val in ("sine", "square"):
             ttk.Radiobutton(row, text=val, variable=self.shape, value=val).pack(side="left", padx=4)
-        self.s_amp = Slider(self.f2, "Vin amplitude", 0.0, 3.0, 1.0,
+        self.s_amp = Slider(self.f2, "V_{IN} amplitude", 0.0, 3.0, 1.0,
                             lambda v: "%.1f V" % v, ch, step=0.1, bold=self.f_bold)
         self.s_amp.frame.pack(fill="x", pady=4)
-        self.s_f2 = Slider(self.f2, "Vin frequency", 1e3, 1e5, 5e3,
+        self.s_f2 = Slider(self.f2, "V_{IN} frequency", 1e3, 1e5, 5e3,
                            lambda v: fmt_freq(float("%.3g" % v)) + "Hz", ch,
                            log=True, bold=self.f_bold)
         self.s_f2.frame.pack(fill="x", pady=4)
@@ -530,8 +635,7 @@ class App:
         self.b_pause.pack(side="left", expand=True, fill="x", padx=(0, 3))
         ttk.Button(row, text="Restart", command=self.restart).pack(
             side="left", expand=True, fill="x", padx=(3, 0))
-        ttk.Label(self.f2, text=HELP2, wraplength=wrap, justify="left",
-                  font=self.f_small).pack(anchor="w", pady=(12, 0))
+        RichText(self.f2, self.f_small, HELP2, wrap_px=wrap).pack(anchor="w", pady=(12, 0))
 
         ttk.Label(cp, text="← →  nudge phase 1°  (Shift: 10°)\nSpace  pause / run",
                   font=self.f_small, foreground="#666").pack(side="bottom", anchor="w")
@@ -544,12 +648,10 @@ class App:
         self.diagram.pack(side="left")
         info = tk.Frame(top, bg=self.bg)
         info.pack(side="left", fill="both", expand=True, padx=(10, 0))
-        self.l_line1 = tk.Label(info, font=self.f_huge, bg=self.bg, anchor="w", justify="left")
+        self.l_line1 = RichText(info, self.f_huge, wrap_px=0)
         self.l_line1.pack(fill="x", pady=(14, 2))
-        self.l_line2 = tk.Label(info, font=self.f_big, bg=self.bg, anchor="w", justify="left")
+        self.l_line2 = RichText(info, self.f_big, wrap_px=0)
         self.l_line2.pack(fill="x")
-        info.bind("<Configure>", lambda e: (self.l_line1.configure(wraplength=e.width - 8),
-                                            self.l_line2.configure(wraplength=e.width - 8)))
 
         # ---- the phase slider ----------------------------------------------
         pf = ttk.Frame(root, padding=(14, 2, 14, 6))
@@ -565,12 +667,12 @@ class App:
         self.pb = Plot(mid, fonts, xlabel="time")
         self.pa.cv.pack(fill="both", expand=True)
         self.pb.cv.pack(fill="both", expand=True)
-        self.pa.add_series("vin", C_VIN, "Vin", 2.5)
-        self.pa.add_series("vfb", C_FB, "Vfb", 2.5)
-        self.pa.add_series("vd", C_DIFF, "Vdiff", 2.0)
-        self.pb.add_series("vin", "#8db6ea", "Vin", 1.5)
-        self.pb.add_series("vd", C_DIFF, "Vdiff", 3.0)
-        self.pb.add_series("vout", C_OUT, "Vout", 2.5)
+        self.pa.add_series("vin", C_VIN, "V_{IN}", 2.5)
+        self.pa.add_series("vfb", C_FB, "V_{FB}", 2.5)
+        self.pa.add_series("vd", C_DIFF, "V_{DIFF}", 2.0)
+        self.pb.add_series("vin", "#8db6ea", "V_{IN}", 1.5)
+        self.pb.add_series("vd", C_DIFF, "V_{DIFF}", 3.0)
+        self.pb.add_series("vout", C_OUT, "V_{OUT}", 2.5)
 
         # ---- right: phasor + Bode ------------------------------------------
         right = ttk.Frame(root, padding=(0, 0, 6, 6))
@@ -637,11 +739,11 @@ class App:
             self.right.rowconfigure(0, weight=0)
             lim = VCC * 1.2
             self.pa.set_ranges(title="At the summing junction", yrange=(-lim, lim))
-            self.pb.hlines = [(VCC, "#777", (6, 4), "+Vcc"), (-VCC, "#777", (6, 4), "−Vcc")]
+            self.pb.hlines = [(VCC, "#777", (6, 4), "+V_{CC}"), (-VCC, "#777", (6, 4), "−V_{CC}")]
             self.pb.set_ranges(title="Output", yrange=(-lim, lim))
             self.span2 = None
             self.restart()
-        self.pa.series["vfb"]["label"] = "Vfb" if m == 1 else "βVout"
+        self.pa.series["vfb"]["label"] = "V_{FB}" if m == 1 else "βV_{OUT}"
         self.pa.fast = self.pb.fast = (m == 2)
         self.pa.show("vd", m == 2)
         self.pb.show("vd", m == 1)
@@ -707,11 +809,10 @@ class App:
                            arrowshape=(9 * u, 11 * u, 4 * u))
 
         def text(x, y, s, color="#222", font=None, anchor="center"):
-            cv.create_text(x * u, y * u, text=s, fill=color, font=font or self.f_bold,
-                           anchor=anchor)
+            draw_rich(cv, x * u, y * u, s, font or self.f_bold, color, anchor)
 
         y = 50
-        text(22, y, "Vin", C_VIN)
+        text(22, y, "V_{IN}", C_VIN)
         cv.create_oval(42 * u, (y - 4) * u, 50 * u, (y + 4) * u, outline="#222", width=w)
         line(50, y, 101, y, arrow="last")
         cv.create_oval(101 * u, (y - 15) * u, 131 * u, (y + 15) * u, outline="#222",
@@ -720,13 +821,13 @@ class App:
         text(90, y - 13, "+")
         text(101, y + 26, "−", font=self.f_big)
         line(131, y, 205, y, color="#222", arrow="last")
-        text(168, y - 16, "Vdiff", C_DIFF)
+        text(168, y - 16, "V_{DIFF}", C_DIFF)
         cv.create_polygon(205 * u, (y - 22) * u, 205 * u, (y + 22) * u, 250 * u, y * u,
                           outline=loop, fill="white" if m == 2 else self.bg, width=w)
         text(220, y, "A", loop)
         line(250, y, 330, y, color=loop, arrow="last")
         cv.create_oval(330 * u, (y - 4) * u, 338 * u, (y + 4) * u, outline=loop, width=w)
-        text(364, y, "Vout", C_OUT if m == 2 else C_OFF)
+        text(364, y, "V_{OUT}", C_OUT if m == 2 else C_OFF)
         fy = 112
         if m == 2:
             cv.create_oval(286 * u, (y - 4) * u, 294 * u, (y + 4) * u, fill="#222", outline="")
@@ -735,7 +836,7 @@ class App:
                                 outline="#222", width=w, fill="white")
             text(223, fy, "β")
             line(206, fy, 116, fy, 116, y + 15, arrow="last")
-            text(160, fy + 14, "βVout", C_FB)
+            text(160, fy + 14, "βV_{OUT}", C_FB)
         else:
             line(290, y, 290, fy, 240, fy, color=C_OFF)
             cv.create_rectangle(206 * u, (fy - 15) * u, 240 * u, (fy + 15) * u,
@@ -745,7 +846,7 @@ class App:
                            width=w, fill="white")
             text(182, fy, "~", C_FB, self.f_big)
             line(170, fy, 116, fy, 116, y + 15, color=C_FB, arrow="last")
-            text(143, fy + 14, "Vfb", C_FB)
+            text(143, fy + 14, "V_{FB}", C_FB)
             text(250, fy + 27, "(loop not connected)", C_OFF, self.f_small)
 
     def draw_phasor(self):
@@ -763,12 +864,11 @@ class App:
         def P(x, y):
             return ox + x * sc, oy - y * sc
 
-        cv.create_text(8 * S, 6 * S, text="Phasor view:  Vdiff = Vin − Vfb", anchor="nw",
-                       font=self.f_bold, fill="#222")
+        draw_rich(cv, 8 * S, 6 * S, "Phasor view:  V_{DIFF} = V_{IN} − V_{FB}",
+                  self.f_bold, "#222", "nw")
         cv.create_oval(*P(-1, 1), *P(1, -1), outline="#3b9a57", dash=(5, 4), width=1.5 * S,
                        fill="#eef8f0")
-        cv.create_text(*P(-0.71, -0.71), text=" |Vin| ", anchor="ne", font=self.f_small,
-                       fill="#3b9a57")
+        draw_rich(cv, *P(-0.71, -0.71), " |V_{IN}| ", self.f_small, "#3b9a57", "ne")
         cv.create_oval(*P(1 - k, k), *P(1 + k, -k), outline="#f0c48a", dash=(2, 4))
         cv.create_line(*P(-1.25, 0), *P(2.6, 0), fill=C_GRID)
         cv.create_line(*P(0, -1.6), *P(0, 1.6), fill=C_GRID)
@@ -784,23 +884,24 @@ class App:
         # labels: Vin on the side of the axis away from Vdiff, Vdiff just past
         # its own tip, -Vfb beside its midpoint on the side away from the origin
         below = dy >= 0
-        cv.create_text(P(0.5, 0)[0], oy + (8 if below else -8) * S, text="Vin",
-                       anchor="n" if below else "s", font=self.f_bold, fill=C_VIN)
+        draw_rich(cv, P(0.5, 0)[0], oy + (8 if below else -8) * S, "V_{IN}",
+                  self.f_bold, C_VIN, "n" if below else "s")
         mag = math.hypot(dx, dy)
         ux, uy = (dx / mag, dy / mag) if mag > 0.03 else (0.0, 1.0)
         tx, ty = P(dx, dy)
-        cv.create_text(tx + ux * 26 * S, ty - uy * 16 * S, text="Vdiff",
-                       font=self.f_bold, fill=C_DIFF)
+        draw_rich(cv, tx + ux * 26 * S, ty - uy * 16 * S, "V_{DIFF}",
+                  self.f_bold, C_DIFF)
         if k > 0.02:
             nx, ny = math.sin(phi), math.cos(phi)      # normal to -Vfb
             mx, my = (1 + dx) / 2, dy / 2
             if nx * mx + ny * my < 0:
                 nx, ny = -nx, -ny
             qx, qy = P(mx, my)
-            cv.create_text(qx + nx * 26 * S, qy - ny * 16 * S, text="−Vfb",
-                           font=self.f_bold, fill=C_FB)
-        cv.create_text(w / 2, h - 4 * S, anchor="s", font=self.f_small, fill="#3b9a57",
-                       text="inside the dashed circle: Vdiff is smaller than Vin")
+            draw_rich(cv, qx + nx * 26 * S, qy - ny * 16 * S, "−V_{FB}",
+                      self.f_bold, C_FB)
+        draw_rich(cv, w / 2, h - 4 * S,
+                  "inside the dashed circle: V_{DIFF} is smaller than V_{IN}",
+                  self.f_small, "#3b9a57", "s")
 
     def refresh(self):
         """Everything that only changes when a control moves."""
@@ -829,13 +930,13 @@ class App:
             self.pb.set_data("vd", xs, vd)
             self.draw_phasor()
             if ratio < 0.995:
-                color, msg = C_GOOD, "feedback is shrinking Vdiff  (acting as negative feedback)"
+                color, msg = C_GOOD, "feedback is shrinking V_{DIFF}  (acting as negative feedback)"
             elif ratio > 1.005:
-                color, msg = C_BAD, "feedback is enlarging Vdiff  (acting as positive feedback)"
+                color, msg = C_BAD, "feedback is enlarging V_{DIFF}  (acting as positive feedback)"
             else:
-                color, msg = "#555", "feedback is rotating Vdiff but not shrinking it"
-            self.l_line1.configure(text="|Vdiff| = %.2f × |Vin|" % ratio, fg=color)
-            self.l_line2.configure(text=msg, fg=color)
+                color, msg = "#555", "feedback is rotating V_{DIFF} but not shrinking it"
+            self.l_line1.set("|V_{DIFF}| = %.2f × |V_{IN}|" % ratio, fg=color)
+            self.l_line2.set(msg, fg=color)
             self.s_phase.value.configure(fg=C_BAD if ph >= 180 else "#222")
             tau, fsig = TAU_VIEW1, (f if self.link.get() else None)
         else:
@@ -856,8 +957,8 @@ class App:
             line1 = "Phase margin = 180° − %.0f° = %+.0f°" % (ph, pm)
             if gm is not None:
                 msg += "\n(gain margin %+.1f dB)" % gm
-            self.l_line1.configure(text=line1.replace("-", "−"), fg=color)
-            self.l_line2.configure(text=msg.replace("-", "−"), fg=color)
+            self.l_line1.set(line1.replace("-", "−"), fg=color)
+            self.l_line2.set(msg.replace("-", "−"), fg=color)
             self.s_phase.value.configure(fg=C_BAD if ph > 180 else "#222")
             fsig = self.s_f2.get()
         # Bode plot

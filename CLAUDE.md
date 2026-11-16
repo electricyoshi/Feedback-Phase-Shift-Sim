@@ -15,8 +15,13 @@ paths and personal details.
 - No `.lnk` / `--install` (deviates from the Tier 1 bundle pattern on purpose): shortcuts
   embed absolute paths and don't survive a `git clone` onto another PC. `*.lnk` is
   gitignored.
+- **Subscripts:** UI strings use `V_{DIFF}` markup (uppercase subscripts, e.g. V_{IN},
+  V_{OUT}, V_{FB}, V_{CC}). Unicode has no uppercase subscripts and Tk Labels can't mix
+  fonts, so `draw_rich()` draws runs on canvases and `RichText` (a read-only tk.Text in a
+  fixed-pixel-height Frame) replaces Labels. Plain-text spots (window title, ttk
+  Radiobutton/Checkbutton text, the Plot.put() "text" annotations) can't use markup.
 - Loop model and why a pure delay is used for excess phase: see README.md "The model"
   and the constants at the top of `feedback_phase_sim.py`.
 
 ## Status
-- Not yet pushed; GitHub remote (public) to be created later. No LICENSE chosen yet.
+- Not yet pushed; GitHub remote (public) to be created later. MIT licensed (holder: electricyoshi).
