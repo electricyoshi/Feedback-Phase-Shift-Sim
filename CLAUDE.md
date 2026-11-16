@@ -77,4 +77,4 @@ paths and personal details.
   and the constants at the top of `feedback_phase_sim.py`.
 
 ## Status
-- Not yet pushed; GitHub remote (public) to be created later. MIT licensed (holder: electricyoshi).
+- Public on GitHub: https://github.com/electricyoshi/Feedback-Phase-Shift-Sim (main). MIT licensed (holder: electricyoshi).
