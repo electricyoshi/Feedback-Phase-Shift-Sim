@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+.venv/
+.env
+*.log
+# Shortcuts embed absolute paths to one machine; make your own if wanted.
+*.lnk
