@@ -3,18 +3,58 @@
 Classroom demo for EE3722 Module 4.2, "The stability problem": what happens to
 V<sub>DIFF</sub> = V<sub>IN</sub> − βV<sub>OUT</sub> as the fed-back signal's phase lag approaches and passes 180°.
 
-## Run it in a browser (Windows, Mac, Chromebook, Linux — nothing to install)
+![View 2: an unstable loop, with the output growing until it clips at the rails](docs/view2-unstable.png)
 
-1. On the GitHub page press the green **Code** button → **Download ZIP**, then unzip it.
-   (Or open `feedback_phase_sim.html` in the file list and press the **Download raw
-   file** button at the top right of the file view.)
-2. Double-click `feedback_phase_sim.html`.
+## Quick start (about a minute, nothing to install)
 
-It is one self-contained file: no internet needed once downloaded, nothing to
-install. Use a current Chrome, Edge, Firefox or Safari. Clicking the file on GitHub
-only shows its source code — it has to be downloaded to run. If something goes wrong
-the page says so in a red bar at the top. Adding `#2` to the address opens it
-straight in view 2.
+1. **[Download the ZIP](https://github.com/electricyoshi/Feedback-Phase-Shift-Sim/archive/refs/heads/main.zip)**
+   (the same thing as the green **Code** button → **Download ZIP**) and unzip it.
+2. Double-click **`feedback_phase_sim.html`**. It opens in your browser.
+3. Drag the big **Phase lag** slider and watch the banner change from green to orange
+   as you pass 180°.
+
+Works on Windows, Mac, Chromebook and Linux in a current Chrome, Edge, Firefox or
+Safari. It is one self-contained file: no internet needed once downloaded.
+
+If it doesn't work:
+
+- **You see a page of code instead of the simulator.** You clicked the file on
+  GitHub, which only shows its source. Download it (step 1) and open the copy on
+  your computer.
+- **Double-clicking does nothing, or opens a text editor.** Right-click the file →
+  **Open with** → your browser. On Windows, unzip first rather than opening the file
+  from inside the ZIP.
+- **A red bar appears at the top of the page.** That is an error message from the
+  simulator; update your browser, and if it is still there send the text of the bar
+  to your instructor.
+
+## Things to try
+
+**View 1 · Summing junction** — the feedback signal is just a copy of V<sub>IN</sub>; no loop yet.
+
+![View 1: feedback signal lagging by 150 degrees, so the difference is larger than the input](docs/view1-summing-junction.png)
+
+- Start at 0° lag: V<sub>FB</sub> nearly cancels V<sub>IN</sub>, so V<sub>DIFF</sub> is small. That is negative
+  feedback doing its job.
+- Drag the phase toward 180°. Find the lag at which |V<sub>DIFF</sub>| becomes *larger* than
+  |V<sub>IN</sub>| (the phasor tip leaves the green circle). The subtraction has turned into
+  an addition.
+- Tick **Link phase to frequency** and sweep **Signal frequency**: now the lag is the
+  one the amplifier really has at that frequency, read off the Bode plot.
+
+**View 2 · Closed loop** — the whole loop, simulated in slow motion with ±5 V rails.
+
+![View 2: a square wave with 45 degrees of phase margin, showing overshoot and ringing that dies out](docs/view2-stable.png)
+
+- Press **Square** and step the phase up from 95° with the → key. Watch the overshoot
+  and ringing grow as the phase margin shrinks.
+- Go past 180° (first picture on this page): the ringing no longer dies out, it grows
+  until the output hits the rails.
+- Set **V<sub>IN</sub> amplitude** to 0 above 180° and press **Restart**. The loop starts
+  oscillating on its own, with no input at all.
+
+Keys: ← / → nudge the phase 1° (Shift for 10°), Space pauses. Adding `#2` to the
+address opens the page straight in view 2.
 
 ## Run the desktop version (Python)
 
@@ -40,9 +80,8 @@ Aβ at the frequency where |Aβ| = 1, i.e. 180° minus the phase margin. Below 1
 square-wave input shows growing overshoot and ringing; above 180° the output
 oscillates and grows until it clips at the rails. With V<sub>IN</sub> at 0 it starts on its own.
 
-Keys: ← / → nudge the phase 1° (Shift for 10°), Space pauses, F11 toggles full
-screen (Esc leaves it; in a browser on a Mac it is Ctrl+Cmd+F). The **?** button
-opens instructor notes.
+F11 toggles full screen (Esc leaves it; in a browser on a Mac it is Ctrl+Cmd+F).
+The **?** button opens instructor notes.
 
 ## Projector layout
 

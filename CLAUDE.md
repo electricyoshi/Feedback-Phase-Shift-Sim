@@ -76,5 +76,13 @@ paths and personal details.
 - Loop model and why a pure delay is used for excess phase: see README.md "The model"
   and the constants at the top of `feedback_phase_sim.py`.
 
+## README screenshots (`docs/*.png`, 1024x768)
+- Taken with headless Chrome (`--headless=new --window-size=1024,768 --screenshot=`)
+  from a **scratch copy** of the HTML with a few lines appended to the script: no-op
+  `requestAnimationFrame`, set `S` (`setMode(2)`, `S.shape`, `S.ph[mode]`), `update()`,
+  then `frame(last + 100)` x75 to fill view 2's traces. `--virtual-time-budget` alone
+  leaves view 2 empty. Current shots: view 1 @150 deg; view 2 square @135 and @195.
+- Retake them when the layout, palette or banner copy changes.
+
 ## Status
 - Public on GitHub: https://github.com/electricyoshi/Feedback-Phase-Shift-Sim (main). MIT licensed (holder: electricyoshi).
