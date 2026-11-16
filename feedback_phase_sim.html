@@ -269,8 +269,8 @@ const NOTES = [
 // Banner text (mirrors view1_status / view2_status in the Python; the sizes live in the CSS)
 function view1Status(k, phDeg) {
   const ratio = view1Ratio(k, phDeg), b1 = '|V_{DIFF}| = ' + ratio.toFixed(2) + ' × |V_{IN}|';
-  if (ratio < 0.995) return { bg: C.GOOD, lines: [b1, 'Negative feedback — the difference shrinks'] };
-  if (ratio > 1.005) return { bg: C.BAD, lines: [b1, 'Positive feedback — the difference grows'] };
+  if (ratio < 0.995) return { bg: C.GOOD, lines: [b1, 'Negative feedback: the difference shrinks'] };
+  if (ratio > 1.005) return { bg: C.BAD, lines: [b1, 'Positive feedback: the difference grows'] };
   return { bg: C.MID, lines: [b1, 'Rotated, but not shrunk'] };
 }
 // title and sub-line of the big phase slider (view 2 picks a different amplifier)
@@ -280,9 +280,9 @@ function phaseLabel(mode) {
 function view2Status(phDeg) {             // phDeg = lag of A*B at crossover
   const pm = 180 - phDeg, f180 = freqForPhase(180, tauFor(phDeg)), gm = f180 ? -20 * Math.log10(loopMag(f180)) : null;
   let bg, msg;
-  if (pm > 0.5) { bg = C.GOOD; msg = pm >= 45 ? 'Stable — ringing dies out' : 'Stable, but barely — heavy ringing'; }
-  else if (pm < -0.5) { bg = C.BAD; msg = 'Unstable — grows until it hits the ±' + VCC + ' V rails'; }
-  else { bg = C.MID; msg = 'On the edge — sustained oscillation'; }
+  if (pm > 0.5) { bg = C.GOOD; msg = pm >= 45 ? 'Stable: ringing dies out' : 'Stable, but barely: heavy ringing'; }
+  else if (pm < -0.5) { bg = C.BAD; msg = 'Unstable: V_{OUT} grows until it hits the rails'; }
+  else { bg = C.MID; msg = 'On the edge: sustained oscillation'; }
   const lines = ['Phase margin ' + (pm > 0 ? '+' : pm < 0 ? '−' : '') + Math.abs(pm).toFixed(0) + '°', msg];
   if (gm != null) lines.push('Gain margin ' + (gm >= 0 ? '+' : '−') + Math.abs(gm).toFixed(1) + ' dB');
   return { bg, lines };
@@ -540,7 +540,7 @@ function update() {
   const st = m === 1 ? view1Status(S.k, ph) : view2Status(ph);
   const bg = st.bg, b1 = st.lines[0], b2 = st.lines[1], b3 = st.lines[2] || '';
   $('banner').style.background = bg;
-  $('b1').innerHTML = subHtml(b1); $('b2').textContent = b2; $('b3').textContent = b3;
+  $('b1').innerHTML = subHtml(b1); $('b2').innerHTML = subHtml(b2); $('b3').textContent = b3;
   $('b3').style.display = b3 ? '' : 'none';
 
   const alert = m === 1 ? ph >= 180 : ph > 180, ink = alert ? C.DIFF : C.INK;

@@ -959,9 +959,9 @@ def view1_status(k, ph_deg):
     """Banner for view 1: (colour, [(markup, stage px, line height), ...])."""
     ratio = view1_ratio(k, ph_deg)
     if ratio < 0.995:
-        color, msg = C_GOOD, "Negative feedback — the difference shrinks"
+        color, msg = C_GOOD, "Negative feedback: the difference shrinks"
     elif ratio > 1.005:
-        color, msg = C_BAD, "Positive feedback — the difference grows"
+        color, msg = C_BAD, "Positive feedback: the difference grows"
     else:
         color, msg = C_MID, "Rotated, but not shrunk"
     return color, [("|V_{DIFF}| = %.2f × |V_{IN}|" % ratio, 36, 1.25), (msg, 22, 1.1)]
@@ -974,13 +974,13 @@ def view2_status(ph_deg):
     gm = -20 * math.log10(loop_mag(f180)) if f180 else None
     if pm > 0.5:
         color = C_GOOD
-        msg = ("Stable — ringing dies out" if pm >= 45
-               else "Stable, but barely — heavy ringing")
+        msg = ("Stable: ringing dies out" if pm >= 45
+               else "Stable, but barely: heavy ringing")
     elif pm < -0.5:
         color = C_BAD
-        msg = "Unstable — grows until it hits the ±%g V rails" % VCC
+        msg = "Unstable: V_{OUT} grows until it hits the rails"
     else:
-        color, msg = C_MID, "On the edge — sustained oscillation"
+        color, msg = C_MID, "On the edge: sustained oscillation"
     sign = "+" if pm > 0 else "−" if pm < 0 else ""
     lines = [("Phase margin %s%.0f°" % (sign, abs(pm)), 36, 1.15), (msg, 22, 1.1)]
     if gm is not None:

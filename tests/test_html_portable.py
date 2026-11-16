@@ -105,7 +105,7 @@ class InBrowser(unittest.TestCase):
         dom = self.dump()
         self.check_no_error(dom)
         self.has(dom, "|V<sub>DIFF</sub>| = 0.10 × |V<sub>IN</sub>|")
-        self.has(dom, "Negative feedback — the difference shrinks")
+        self.has(dom, "Negative feedback: the difference shrinks")
         for c in ("cvD", "cvPA", "cvPB", "cvR1"):
             self.drawn(dom, c)
 
