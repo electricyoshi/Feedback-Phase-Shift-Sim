@@ -25,7 +25,15 @@ Aβ at the frequency where |Aβ| = 1, i.e. 180° minus the phase margin. Below 1
 square-wave input shows growing overshoot and ringing; above 180° the output
 oscillates and grows until it clips at the rails. With V<sub>IN</sub> at 0 it starts on its own.
 
-Keys: ← / → nudge the phase 1° (Shift for 10°), Space pauses.
+Keys: ← / → nudge the phase 1° (Shift for 10°), Space pauses, F11 toggles full
+screen (Esc leaves it). The **?** button opens instructor notes.
+
+## Projector layout
+
+Built for a low-resolution 4:3 classroom projector: white background, bold type,
+thick lines and a colour-blind-safe (Okabe-Ito) palette, with V<sub>FB</sub> drawn black *and*
+dashed. The whole layout is designed on a 1024 × 768 stage and scales to fill the
+window, so maximise it or press F11 on the projector.
 
 ## The model
 

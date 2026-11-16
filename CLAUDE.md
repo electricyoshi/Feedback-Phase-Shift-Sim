@@ -15,11 +15,22 @@ paths and personal details.
 - No `.lnk` / `--install` (deviates from the Tier 1 bundle pattern on purpose): shortcuts
   embed absolute paths and don't survive a `git clone` onto another PC. `*.lnk` is
   gitignored.
+- **Projector UI (design handoff, Nov 2026):** every size is in "stage px" on a
+  1024x768 stage, times global `Z = min(win_w/1024, win_h/768)` (`zs()`, `bold(px)`).
+  Root `<Configure>` (debounced) recomputes Z, resizes the named fonts in place
+  (`rescale_fonts()`) and redraws. Fonts use negative = pixel sizes so DPI isn't
+  applied twice. Palette/widths are final per the handoff; don't drift them.
+- **All controls are canvas-drawn** (`ButtonBar`, `CheckBox`, `Slider`, `PhaseBar`):
+  ttk can't do solid fills / 4 px borders on Windows and is too small on a projector.
+  No ttk widgets remain.
+- **Windows Tk dashes:** any dashed line wider than 1 px renders as dots. Wide dashed
+  lines go through `dashed_line()` (stack of 1-px dashed lines); dashed traces always
+  use the 1-px-stack path in `Plot._plot`; the phasor's dashed circle is solid arcs.
 - **Subscripts:** UI strings use `V_{DIFF}` markup (uppercase subscripts, e.g. V_{IN},
-  V_{OUT}, V_{FB}, V_{CC}). Unicode has no uppercase subscripts and Tk Labels can't mix
-  fonts, so `draw_rich()` draws runs on canvases and `RichText` (a read-only tk.Text in a
-  fixed-pixel-height Frame) replaces Labels. Plain-text spots (window title, ttk
-  Radiobutton/Checkbutton text, the Plot.put() "text" annotations) can't use markup.
+  V_{OUT}, V_{FB}, V_{CC}). Unicode has no uppercase subscripts and Tk can't mix fonts
+  in one text item, so `draw_rich()` / `draw_runs()` draw runs on canvases; `RichText`
+  (read-only tk.Text) is only used for wrapped text in the "?" notes window. Plain-text
+  spots (window title, Plot.put() "text" annotations) can't use markup.
 - Loop model and why a pure delay is used for excess phase: see README.md "The model"
   and the constants at the top of `feedback_phase_sim.py`.
 
