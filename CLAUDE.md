@@ -17,16 +17,21 @@ paths and personal details.
   `<input type=range>` (log sliders step 0.005 decades vs continuous in Tk).
 - **Parity:** must match exactly - model constants (A0, BETA, FP, VCC, TAU_VIEW1,
   F1_MIN/F1_MAX, BODE_X1/BODE_X2), LoopSim (DT, MASK, NOISE, half-sample correction,
-  rec/trim), phase ranges/defaults (0-360 @0, 95-270 @120), slider ranges/steps/
+  rec/trim), F2_MIN/F2_MAX, phase ranges/defaults (0-360 @0, 95-270 @120), slider ranges/steps/
   defaults, banner thresholds and copy, plot titles/ticks/units, palette and stage-px
   sizes. Enforced by `tests/test_parity.py` for everything except layout/drawing.
 - **Testable logic lives in pure module-level functions**, same names in both files
   (`view1_status`/`view1Status`, `view2_status`, `view1_ratio`, `linked_phase`,
-  `time_unit`, `phase_label`, `bode_freqs`, formatters). Put new numbers/wording there, not inside
+  `time_unit`, `view2_time`, `phase_label`, `bode_freqs`, formatters). Put new numbers/wording there, not inside
   `App.refresh` / `update()`, or the tests can't see them.
 - **View 1 signal frequency is 1 Hz - 300 kHz** so the linked phase reaches 0 deg
   (pole alone is 5.7 deg at 100 Hz). View 1's Bode axis is therefore 1 Hz - 1 MHz
-  with every other decade labelled (`xlabels`); view 2 keeps 100 Hz - 1 MHz.
+  with every other decade labelled (`xlabels`).
+- **View 2 V_IN frequency is 1 kHz - 2 MHz** (`F2_MIN`/`F2_MAX`), a decade past the
+  100 kHz crossover. Three things exist only to support that: `LoopSim.DT` = 5 ns
+  (100 samples/cycle at 2 MHz; `MASK` 2047 holds the 1003-sample delay at 270 deg;
+  `NOISE` scaled by 1/sqrt(DT)), `view2_time()` (time axis unchanged to 100 kHz, then
+  10 cycles in µs), and view 2's Bode axis 100 Hz - 10 MHz with |AB| down to -50 dB.
 
 ## Tests (`py -m unittest discover -s tests -v`, stdlib unittest)
 - `test_model.py` - Python physics vs textbook formulas, incl. LoopSim steady-state

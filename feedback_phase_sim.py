@@ -76,7 +76,10 @@ TAU_VIEW1 = tau_for_crossover_phase(150.0)
 # (the pole alone still gives 5.7 deg at 100 Hz, 0.06 deg at 1 Hz).
 F1_MIN, F1_MAX = 1.0, 3.0e5
 BODE_X1 = (1.0, 1.0e6)      # Bode frequency axis in view 1 (covers F1_MIN)
-BODE_X2 = (100.0, 1.0e6)    # ... and in view 2
+BODE_X2 = (100.0, 1.0e7)    # ... and in view 2 (covers F2_MAX)
+# View 2 "V_IN frequency" range.  It runs a decade past the 100 kHz crossover so
+# students can drive the loop where |A*B| < 1 and feedback no longer does anything.
+F2_MIN, F2_MAX = 1.0e3, 2.0e6
 BODE_PER_DECADE = 60        # points per decade on the Bode curves
 
 
@@ -103,6 +106,14 @@ def time_unit(span):
     return ("ms", 1e3) if span >= 2e-3 else ("µs", 1e6)
 
 
+def view2_time(f):
+    """(span s, unit, multiplier) of view 2's scrolling time axis at input
+    frequency f.  2.5 cycles of V_IN, but never under 100 us up to 100 kHz so
+    ringing near crossover stays in view; above that, 10 cycles."""
+    span = min(1e-3, max(min(1e-4, 10.0 / f), 2.5 / f))
+    return (span, "ms", 1e3) if span >= 1e-4 else (span, "µs", 1e6)
+
+
 def phase_label(mode):
     """(title, sub-line) of the big phase slider.  View 1 imposes a lag on the
     fed-back signal; in view 2 the same slider picks the loop's lag at crossover,
@@ -114,9 +125,13 @@ def phase_label(mode):
 
 class LoopSim:
     """Time-domain closed loop with rail saturation (forward Euler + delay line)."""
-    DT = 2.5e-8
-    MASK = 1023
-    NOISE = 2e-3     # tiny disturbance so an unstable loop can start by itself
+    # 5 ns = 100 samples per cycle at F2_MAX.  MASK must hold the longest delay:
+    # 270 deg at crossover is 5.02 us = 1003 samples.
+    DT = 5e-9
+    MASK = 2047
+    # tiny disturbance so an unstable loop can start by itself (scaled with
+    # 1/sqrt(DT) so its strength inside the loop bandwidth doesn't depend on DT)
+    NOISE = 4.5e-3
 
     def __init__(self):
         self.reset()
@@ -1061,9 +1076,9 @@ class App:
         self.phasor = tk.Canvas(right, bg=BG, highlightthickness=0, width=10, height=10)
         self.phasor.bind("<Configure>", lambda e: self.draw_phasor())
         bode = dict(xrange=BODE_X2, logx=True, xfmt=fmt_freq,
-                    xticks=[1, 10, 100, 1e3, 1e4, 1e5, 1e6])
-        self.bm = Plot(right, title="|Aβ|  (dB)", yrange=(-30, 50),
-                       yticks=[-20, 0, 20, 40], show_x=False, **bode)
+                    xticks=[1, 10, 100, 1e3, 1e4, 1e5, 1e6, 1e7])
+        self.bm = Plot(right, title="|Aβ|  (dB)", yrange=(-50, 50),
+                       yticks=[-40, -20, 0, 20, 40], show_x=False, **bode)
         self.bp = Plot(right, title="Phase of Aβ  (°)", yrange=(-360, 0), xunit="Hz",
                        yticks=[-360, -180, 0], **bode)
         self.bm.hlines = [(0, C_MID, "", False)]
@@ -1096,7 +1111,7 @@ class App:
         self.seg_shape.set_active(0)
         self.s_amp = Slider(self.f2, "V_{IN} amplitude", 0.0, 3.0, 1.0,
                             lambda v: "%.1f V" % v, ch, step=0.1)
-        self.s_f2 = Slider(self.f2, "V_{IN} frequency", 1e3, 1e5, 5e3, fmt_hz, ch,
+        self.s_f2 = Slider(self.f2, "V_{IN} frequency", F2_MIN, F2_MAX, 5e3, fmt_hz, ch,
                            log=True)
         self.s_speed = Slider(self.f2, "Speed", 0.25, 4.0, 1.0,
                               lambda v: "%.2g×" % v, ch, log=True)
@@ -1562,7 +1577,10 @@ class App:
         # lines carry the margins; dots on them made those points look special.
         if fsig:
             self.bm.put("fsig_d", "dot", x=fsig, y=20 * math.log10(loop_mag(fsig)), color=C_VIN)
-            self.bp.put("fsig_d", "dot", x=fsig, y=-loop_phase(fsig, tau), color=C_VIN)
+            # past 360 deg the curve has left the plot: no dot rather than one
+            # parked on the bottom edge
+            lag = loop_phase(fsig, tau)
+            self.bp.put("fsig_d", "dot", x=fsig if lag <= 360 else None, y=-lag, color=C_VIN)
         else:
             self.bm.put("fsig_d", "dot", x=None, y=0, color=C_VIN)
             self.bp.put("fsig_d", "dot", x=None, y=0, color=C_VIN)
@@ -1577,11 +1595,11 @@ class App:
         if self.mode.get() == 2:
             sim = self.sim
             f = self.s_f2.get()
-            span = min(1e-3, max(1e-4, 2.5 / f))
+            span, unit, mul = view2_time(f)
             if span != self.span2:
                 self.span2 = span
-                self.pa.configure(xrange=(-span * 1e3, 0), xunit="ms")
-                self.pb.configure(xrange=(-span * 1e3, 0), xunit="ms")
+                self.pa.configure(xrange=(-span * mul, 0), xunit=unit)
+                self.pb.configure(xrange=(-span * mul, 0), xunit=unit)
             if not self.paused:
                 steps = elapsed * span * self.s_speed.get() / self.SWEEP_S / sim.DT + self.carry
                 n = int(steps)
@@ -1592,7 +1610,7 @@ class App:
                 sim.trim(span)
             i0 = bisect.bisect_left(sim.T, sim.t - span)
             t1 = sim.t
-            xs = [(t - t1) * 1e3 for t in sim.T[i0:]]
+            xs = [(t - t1) * mul for t in sim.T[i0:]]
             vout = sim.VOUT[i0:]
             self.pa.set_data("vin", xs, sim.VIN[i0:])
             self.pa.set_data("vfb", xs, [BETA * v for v in vout])

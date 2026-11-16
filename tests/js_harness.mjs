@@ -27,7 +27,7 @@ const el = id => els[id] || (els[id] = {
 });
 const document = { getElementById: el, querySelectorAll: () => [] };
 const window = { addEventListener() {}, innerWidth: 1024, innerHeight: 768, devicePixelRatio: 1 };
-const names = ['A0', 'BETA', 'FP', 'VCC', 'L0', 'FC', 'POLE_PHASE_FC', 'TAU_VIEW1', 'F1_MIN', 'F1_MAX',
+const names = ['A0', 'BETA', 'FP', 'VCC', 'L0', 'FC', 'POLE_PHASE_FC', 'TAU_VIEW1', 'F1_MIN', 'F1_MAX', 'F2_MIN', 'F2_MAX', 'view2Time',
   'BODE_X1', 'BODE_X2', 'BODE_PER_DECADE', 'SWEEP_S', 'DASH', 'C', 'NOTES', 'S', 'LoopSim',
   'loopMag', 'loopPhase', 'tauFor', 'freqForPhase', 'bodeFreqs', 'linkedPhase', 'view1Ratio',
   'timeUnit', 'fmtNum', 'fmtFreq', 'fmtHz', 'niceTicks', 'view1Status', 'view2Status', 'phaseLabel',

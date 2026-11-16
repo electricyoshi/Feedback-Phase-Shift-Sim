@@ -122,6 +122,29 @@ class Sim(unittest.TestCase):
             got = max(abs(v) for v in sim.VOUT[-n:]) / 0.05
             self.assertAlmostEqual(got / want, 1.0, delta=0.01, msg=(ph, f, got, want))
 
+    def test_view2_range_fits_the_sim(self):
+        # the longest delay the slider can ask for must fit the delay line
+        tau = m.tau_for_crossover_phase(270)
+        self.assertLess(tau / m.LoopSim.DT + 2, m.LoopSim.MASK + 1)
+        self.assertGreaterEqual(1 / m.F2_MAX / m.LoopSim.DT, 100)      # samples per cycle
+        self.assertLessEqual(m.F2_MAX, m.BODE_X2[1])                    # marker stays on the plot
+        # time axis: unchanged up to 100 kHz, then 10 cycles in microseconds
+        self.assertEqual(m.view2_time(1e3), (1e-3, "ms", 1e3))
+        self.assertEqual(m.view2_time(1e5), (1e-4, "ms", 1e3))
+        span, unit, _ = m.view2_time(m.F2_MAX)
+        self.assertAlmostEqual(span * m.F2_MAX, 10)
+        self.assertEqual(unit, "µs")
+
+    def test_gain_above_crossover_matches_theory(self):
+        # past crossover the loop gain is < 1, so Vout is just A * Vin
+        for f in (5e5, m.F2_MAX):
+            tau = m.tau_for_crossover_phase(120)
+            L = loop_gain(f, tau)
+            want = abs(L / m.BETA / (1 + L))
+            sim = self.run_sim(120, 0.5, f, 3e-4)
+            got = max(abs(v) for v in sim.VOUT[-int(2 / f / (4 * sim.DT)):]) / 0.5
+            self.assertAlmostEqual(got / want, 1.0, delta=0.02, msg=(f, got, want))
+
     def test_stable_loop_stays_quiet(self):
         sim = self.run_sim(150, 0.0, 5e3, 2e-3, noise=self._noise)
         self.assertLess(max(abs(v) for v in sim.VOUT), 0.2)

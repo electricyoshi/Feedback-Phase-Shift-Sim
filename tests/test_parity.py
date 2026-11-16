@@ -131,6 +131,15 @@ class Parity(unittest.TestCase):
             self.assertEqual(g["bg"], color, c)
             self.assertEqual(g["lines"], [text for text, _, _ in lines], c)
 
+    def test_view2_frequency_range_and_time_axis(self):
+        freqs = [1e3, 2.5e3, 5e3, 2.5e4, 1e5, 100001, 2e5, 1e6, 2e6]
+        got = js([fn("F2_MIN"), fn("F2_MAX")] + [fn("view2Time", f) for f in freqs])
+        self.assertEqual(got[:2], [m.F2_MIN, m.F2_MAX])
+        for f, g in zip(freqs, got[2:]):
+            w = m.view2_time(f)
+            self.close(g[0], w[0], f)
+            self.assertEqual(g[1:], list(w[1:]), f)
+
     def test_phase_slider_label(self):
         got = js([fn("phaseLabel", 1), fn("phaseLabel", 2)])
         self.assertEqual(got, [list(m.phase_label(1)), list(m.phase_label(2))])
@@ -148,7 +157,7 @@ class Parity(unittest.TestCase):
         # noise off on both sides; a square wave so no sin() is involved and
         # the two should agree to the last bit
         for ph, amp in ((120, 1.0), (170, 1.0), (200, 0.5)):
-            p = dict(n=20000, amp=amp, freq=5e3, square=True, tau=m.tau_for_crossover_phase(ph), rec=7)
+            p = dict(n=100000, amp=amp, freq=5e3, square=True, tau=m.tau_for_crossover_phase(ph), rec=7)
             got = js([{"sim": p}])[0]
             noise = m.LoopSim.NOISE
             try:
@@ -185,7 +194,9 @@ class Parity(unittest.TestCase):
         self.assertGreaterEqual(10 ** f1["max"], m.F1_MAX)      # the script clamps to F1_MAX
         self.assertLess(10 ** (f1["max"] - f1["step"]), m.F1_MAX)
         self.assertAlmostEqual(10 ** f1["value"], 1e3)
-        self.assertEqual((10 ** f2["min"], 10 ** f2["max"]), (1e3, 1e5))
+        self.assertAlmostEqual(10 ** f2["min"], m.F2_MIN)
+        self.assertGreaterEqual(10 ** f2["max"], m.F2_MAX)      # the script clamps to F2_MAX
+        self.assertLess(10 ** (f2["max"] - f2["step"]), m.F2_MAX)
         self.assertAlmostEqual(10 ** f2["value"], 5e3, delta=1)
         self.assertAlmostEqual(10 ** sp["min"], 0.25, delta=1e-3)
         self.assertAlmostEqual(10 ** sp["max"], 4.0, delta=1e-2)

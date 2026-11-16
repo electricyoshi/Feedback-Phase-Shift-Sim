@@ -128,7 +128,7 @@
       <label class="slider"><span><span>V<sub>IN</sub> amplitude</span><span id="ampText"></span></span>
         <input id="amp" type="range" min="0" max="3" step="0.1" value="1"></label>
       <label class="slider"><span><span>V<sub>IN</sub> frequency</span><span id="f2Text"></span></span>
-        <input id="f2in" type="range" min="3" max="5" step="0.005" value="3.69897"></label>
+        <input id="f2in" type="range" min="3" max="6.305" step="0.005" value="3.69897"></label>
       <label class="slider"><span><span>Speed</span><span id="speedText"></span></span>
         <input id="speed" type="range" min="-0.602" max="0.602" step="0.002" value="0"></label>
       <div style="flex:none;display:flex;gap:8px">
@@ -177,7 +177,9 @@ const TAU_VIEW1 = tauFor(150);            // fixed excess delay for view 1's Bod
 // linked to the Bode plot, the lag can be brought all the way down to 0 deg
 // (the pole alone still gives 5.7 deg at 100 Hz, 0.06 deg at 1 Hz).
 const F1_MIN = 1, F1_MAX = 3e5;
-const BODE_X1 = [1, 1e6], BODE_X2 = [100, 1e6], BODE_PER_DECADE = 60;   // Bode axis, views 1 / 2
+const BODE_X1 = [1, 1e6], BODE_X2 = [100, 1e7], BODE_PER_DECADE = 60;   // Bode axis, views 1 / 2
+// View 2 "V_IN frequency" range: a decade past the 100 kHz crossover, where |A*B| < 1.
+const F2_MIN = 1e3, F2_MAX = 2e6;
 function bodeFreqs(xr) {
   const n = Math.round(Math.log10(xr[1] / xr[0]) * BODE_PER_DECADE), out = [];
   for (let i = 0; i <= n; i++) out.push(xr[0] * 10 ** (i / BODE_PER_DECADE));
@@ -187,6 +189,12 @@ const linkedPhase = f => Math.min(360, loopPhase(f, TAU_VIEW1));   // view 1, ph
 function view1Ratio(k, phDeg) {           // |V_DIFF| / |V_IN| when V_FB = k * V_IN lagging phDeg
   const phi = phDeg * Math.PI / 180;
   return Math.hypot(1 - k * Math.cos(phi), k * Math.sin(phi));
+}
+// view 2 time axis [span s, unit, multiplier]: 2.5 cycles of V_IN, but never under
+// 100 us up to 100 kHz so ringing near crossover stays in view; above that, 10 cycles
+function view2Time(f) {
+  const span = Math.min(1e-3, Math.max(Math.min(1e-4, 10 / f), 2.5 / f));
+  return span >= 1e-4 ? [span, 'ms', 1e3] : [span, 'µs', 1e6];
 }
 const timeUnit = span => span >= 2 ? ['s', 1] : span >= 2e-3 ? ['ms', 1e3] : ['µs', 1e6];
 
@@ -225,7 +233,7 @@ class LoopSim {
     if (i0 > 200) for (const a of [this.T, this.VIN, this.VOUT, this.VD]) a.splice(0, i0);
   }
 }
-LoopSim.DT = 2.5e-8; LoopSim.MASK = 1023; LoopSim.NOISE = 2e-3;
+LoopSim.DT = 5e-9; LoopSim.MASK = 2047; LoopSim.NOISE = 0.0045;   // see the Python file for why
 function lowerBound(a, v) { let lo = 0, hi = a.length; while (lo < hi) { const m = (lo + hi) >> 1; if (a[m] < v) lo = m + 1; else hi = m; } return lo; }
 
 // ---------------------------------------------------------------------------
@@ -415,10 +423,10 @@ function drawTime() {
     plot(cv.pb, { ...base, title: 'Out of the summer',
       series: [{ xs, ys: vin, color: C.VIN, width: 2.5, label: 'V_{IN}' }, { xs, ys: vd, color: C.DIFF, width: 4, label: 'V_{DIFF}' }] });
   } else {
-    const span = Math.min(1e-3, Math.max(1e-4, 2.5 / S.f2)), i0 = lowerBound(sim.T, sim.t - span);
+    const [span, unit, mul] = view2Time(S.f2), i0 = lowerBound(sim.T, sim.t - span);
     const xs = [], fb = [];
-    for (let i = i0; i < sim.T.length; i++) { xs.push((sim.T[i] - sim.t) * 1e3); fb.push(BETA * sim.VOUT[i]); }
-    const vin = sim.VIN.slice(i0), base = { xr: [-span * 1e3, 0], yr: [-VCC * 1.2, VCC * 1.2], yticks: [-VCC, 0, VCC], xunit: 'ms' };
+    for (let i = i0; i < sim.T.length; i++) { xs.push((sim.T[i] - sim.t) * mul); fb.push(BETA * sim.VOUT[i]); }
+    const vin = sim.VIN.slice(i0), base = { xr: [-span * mul, 0], yr: [-VCC * 1.2, VCC * 1.2], yticks: [-VCC, 0, VCC], xunit: unit };
     plot(cv.pa, { ...base, title: 'At the summer',
       series: [{ xs, ys: vin, color: C.VIN, width: 3, label: 'V_{IN}' }, { xs, ys: fb, color: C.FB, width: 2.5, dash: DASH, label: 'βV_{OUT}' },
                { xs, ys: sim.VD.slice(i0), color: C.DIFF, width: 3, label: 'V_{DIFF}' }] });
@@ -436,14 +444,15 @@ function drawStatic() {
   const f180 = freqForPhase(180, tau), bf = bodeFreqs(xr), mag = bf.map(f => 20 * Math.log10(loopMag(f))), ph = bf.map(f => -loopPhase(f, tau));
   const vlines = [{ x: FC, color: C.MID, dash: DASH }, { x: f180, color: C.DIFF, dash: DASH }, { x: fsig, color: C.VIN }];
   // view 1: six decades are too tight to label every one at this width
-  const xb = { xr, logx: true, xticks: [1, 10, 100, 1e3, 1e4, 1e5, 1e6], xlabels: S.mode === 1 ? [1, 100, 1e4, 1e6] : null, xfmt: fmtFreq, vlines };
-  const magPlot = { ...xb, title: '|Aβ|  (dB)', yr: [-30, 50], yticks: [-20, 0, 20, 40], noX: true,
+  const xb = { xr, logx: true, xticks: [1, 10, 100, 1e3, 1e4, 1e5, 1e6, 1e7], xlabels: S.mode === 1 ? [1, 100, 1e4, 1e6] : null, xfmt: fmtFreq, vlines };
+  const magPlot = { ...xb, title: '|Aβ|  (dB)', yr: [-50, 50], yticks: [-40, -20, 0, 20, 40], noX: true,
     hlines: [{ y: 0, color: C.MID }], series: [{ xs: bf, ys: mag, color: C.INK, width: 3.5 }],
     texts: [{ x: FC, dx: -8, dy: 16, text: '|Aβ| = 1', color: C.MID, align: 'right' }],
     dots: [{ x: fsig, y: fsig ? 20 * Math.log10(loopMag(fsig)) : 0, color: C.VIN }] };
   const phPlot = { ...xb, title: 'Phase of Aβ  (°)', yr: [-360, 0], yticks: [-360, -180, 0], xunit: 'Hz',
     hlines: [{ y: -180, color: C.DIFF }], series: [{ xs: bf, ys: ph, color: C.INK, width: 3.5 }],
-    dots: [{ x: fsig, y: fsig ? -loopPhase(fsig, tau) : 0, color: C.VIN }] };
+    // past 360 deg the curve has left the plot: no dot rather than one parked on the bottom edge
+    dots: [{ x: fsig && loopPhase(fsig, tau) <= 360 ? fsig : null, y: fsig ? -loopPhase(fsig, tau) : 0, color: C.VIN }] };
   if (S.mode === 1) { drawPhasor(); if (S.link) plot(cv.r2, phPlot); }
   else { plot(cv.r1, magPlot); plot(cv.r2, phPlot); }
 }
@@ -572,7 +581,7 @@ $('k').oninput = e => { S.k = +e.target.value; update(); };
 $('link').onchange = e => { S.link = e.target.checked; if (S.link) linkPhaseToF1(); update(); };
 $('f1in').oninput = e => { S.f1 = Math.min(F1_MAX, Math.max(F1_MIN, 10 ** +e.target.value)); if (S.link) linkPhaseToF1(); update(); };
 $('amp').oninput = e => { S.amp = +e.target.value; update(); };
-$('f2in').oninput = e => { S.f2 = 10 ** +e.target.value; update(); };
+$('f2in').oninput = e => { S.f2 = Math.min(F2_MAX, Math.max(F2_MIN, 10 ** +e.target.value)); update(); };
 $('speed').oninput = e => { S.speed = 10 ** +e.target.value; update(); };
 $('sine').onclick = () => { S.shape = 'sine'; update(); };
 $('square').onclick = () => { S.shape = 'square'; update(); };
@@ -613,7 +622,7 @@ function frame(now) {
   const el = Math.min((now - last) / 1000, 0.1);
   last = now;
   if (S.mode === 2) {
-    const span = Math.min(1e-3, Math.max(1e-4, 2.5 / S.f2));
+    const span = view2Time(S.f2)[0];
     if (!S.paused) {
       const steps = el * span * S.speed / SWEEP_S / LoopSim.DT + carry, n = Math.floor(steps);
       carry = steps - n;
