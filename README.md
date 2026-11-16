@@ -5,6 +5,8 @@ Classroom demo for EE3722 Module 4.2, "The stability problem": what happens to
 
 ## Run
 
+On Windows, double-click `Feedback Phase Sim.bat`. Or from a terminal:
+
     python feedback_phase_sim.py
 
 Python 3.8+ and nothing else — it uses only the standard library (tkinter).
