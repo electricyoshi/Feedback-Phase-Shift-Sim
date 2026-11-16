@@ -33,7 +33,10 @@
   #header { align-items: center; gap: 10px; height: 52px; }
   #header button { height: 52px; padding: 0 18px; border-width: 4px; font-size: 22px; }
   #header #help { width: 26px; height: 26px; padding: 0; font-size: 14px; border-width: 2px; }
+  .spacer { flex: 1; }
   #eq { font-size: 28px; white-space: nowrap; }
+  #drow { gap: 8px; height: 112px; }
+  #cvD { width: 292px; height: 112px; flex: none; }
   #banner {
     flex: 1; min-width: 0; color: #FFFFFF; padding: 6px 18px;
     display: flex; flex-direction: column; justify-content: center; gap: 3px;
@@ -45,8 +48,18 @@
     align-items: center; gap: 16px; height: 76px; border: 4px solid #111111;
     box-sizing: border-box; padding: 0 16px;
   }
+  #phaseHead { min-width: 176px; flex: none; white-space: nowrap; }
+  #phaseTitle { font-size: 26px; line-height: 1.1; }
+  #phaseSub { font-size: 17px; line-height: 1.2; }
+  #phaseVal { width: 128px; flex: none; text-align: right; font-size: 56px; line-height: 1; }
   #track { flex: 1; position: relative; height: 68px; cursor: pointer; touch-action: none; margin: 0 22px; }
   #track > div { position: absolute; }
+  #plots { display: flex; gap: 8px; flex: 1; min-height: 0; }
+  .col { display: flex; flex-direction: column; gap: 6px; min-height: 0; }
+  #colL { width: 582px; flex: none; }
+  #colR { flex: 1; min-width: 0; }
+  .col canvas { flex: 1; min-height: 0; width: 100%; }
+  .btns { flex: none; display: flex; }
   #footer {
     height: 56px; align-items: center; gap: 22px; border-top: 4px solid #111111;
     padding-top: 6px; box-sizing: border-box; font-size: 17px;
@@ -75,21 +88,21 @@
   <div id="header" class="row">
     <button id="tab1" class="on">1 · Summing junction</button>
     <button id="tab2">2 · Closed loop</button>
-    <div style="flex:1"></div>   <!-- equal spacers: equation centred between the tabs and "?" -->
+    <div class="spacer"></div>   <!-- equal spacers: equation centred between the tabs and "?" -->
     <div id="eq"><span style="color:#D55E00">V<sub>DIFF</sub></span> = <span style="color:#0072B2">V<sub>IN</sub></span> − βV<sub>OUT</sub></div>
-    <div style="flex:1"></div>
+    <div class="spacer"></div>
     <button id="help">?</button>
   </div>
 
-  <div class="row" style="gap:8px;height:112px">
-    <canvas id="cvD" style="width:292px;height:112px;flex:none"></canvas>
+  <div id="drow" class="row">
+    <canvas id="cvD"></canvas>
     <div id="banner"><div id="b1"></div><div id="b2"></div><div id="b3"></div></div>
   </div>
 
   <div id="phasebar" class="row">
-    <div style="min-width:176px;flex:none;white-space:nowrap">
-      <div id="phaseTitle" style="font-size:26px;line-height:1.1">Phase lag</div>
-      <div id="phaseSub" style="font-size:17px;line-height:1.2"></div>
+    <div id="phaseHead">
+      <div id="phaseTitle">Phase lag</div>
+      <div id="phaseSub"></div>
     </div>
     <div id="track">
       <div style="left:0;right:0;top:20px;height:12px;background:#111111"></div>
@@ -98,18 +111,12 @@
       <div id="markText" style="top:46px;width:80px;margin-left:-40px;text-align:center;font-size:17px;color:#D55E00">180°</div>
       <div id="thumb" style="top:4px;width:44px;height:44px;margin-left:-22px;box-sizing:border-box;border-radius:50%;background:#FFFFFF;border:7px solid #111111"></div>
     </div>
-    <div id="phaseVal" style="width:128px;flex:none;text-align:right;font-size:56px;line-height:1"></div>
+    <div id="phaseVal"></div>
   </div>
 
-  <div style="display:flex;gap:8px;flex:1;min-height:0">
-    <div style="width:582px;flex:none;display:flex;flex-direction:column;gap:6px;min-height:0">
-      <canvas id="cvPA" style="flex:1;min-height:0;width:100%"></canvas>
-      <canvas id="cvPB" style="flex:1;min-height:0;width:100%"></canvas>
-    </div>
-    <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:6px;min-height:0">
-      <canvas id="cvR1" style="flex:1;min-height:0;width:100%"></canvas>
-      <canvas id="cvR2" style="flex:1;min-height:0;width:100%"></canvas>
-    </div>
+  <div id="plots">
+    <div id="colL" class="col"><canvas id="cvPA"></canvas><canvas id="cvPB"></canvas></div>
+    <div id="colR" class="col"><canvas id="cvR1"></canvas><canvas id="cvR2"></canvas></div>
   </div>
 
   <div id="footer" class="row">
@@ -123,7 +130,7 @@
         <input id="f1in" type="range" min="0" max="5.48" step="0.005" value="3"></label>
     </div>
     <div id="f2" style="display:none">
-      <div style="flex:none;display:flex">
+      <div class="btns">
         <button id="sine" class="on">Sine</button><button id="square" style="border-left:0">Square</button>
       </div>
       <label class="slider"><span><span>V<sub>IN</sub> amplitude</span><span id="ampText"></span></span>
@@ -132,7 +139,7 @@
         <input id="f2in" type="range" min="3" max="6.305" step="0.005" value="3.69897"></label>
       <label class="slider"><span><span>Speed</span><span id="speedText"></span></span>
         <input id="speed" type="range" min="-0.602" max="0.602" step="0.002" value="0"></label>
-      <div style="flex:none;display:flex;gap:8px">
+      <div class="btns" style="gap:8px">
         <button id="pause" style="width:86px;padding:0">Pause</button>
         <button id="restart" style="width:86px;padding:0">Restart</button>
       </div>
