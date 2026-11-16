@@ -14,7 +14,8 @@ paths and personal details.
   export (that is an opaque compressed bundle; don't edit or commit it).
 - Known, accepted differences: browser draws dashes natively (no `dashed_line()`
   workaround needed); browser F11 is the browser's own full screen; sliders are native
-  `<input type=range>` (log sliders step 0.005 decades vs continuous in Tk).
+  `<input type=range>` (log sliders step 0.005 decades vs continuous in Tk); the
+  **portrait (phone) layout is HTML-only** (see below).
 - **Parity:** must match exactly - model constants (A0, BETA, FP, VCC, TAU_VIEW1,
   F1_MIN/F1_MAX, BODE_X1/BODE_X2), LoopSim (DT, MASK, NOISE, half-sample correction,
   rec/trim), F2_MIN/F2_MAX, phase ranges/defaults (0-360 @0, 95-270 @120), slider ranges/steps/
@@ -43,10 +44,22 @@ paths and personal details.
   newer than Safari 14 (no static class fields, `?.`, `??`, CSS `inset`). Browser:
   headless Chrome/Edge `--dump-dom` from `file://`, both views (`#2` = view 2),
   checks the `#err` bar is empty and every canvas was drawn. Skipped with no browser.
+  `Layout` class: portrait at 320/360/390@3x/430/820 px wide and landscape at
+  phone and desktop sizes. It appends `PROBE` (a measuring script) to a temp copy of the
+  page, loads it in an **iframe of phone size**, and the probe `postMessage`s its
+  numbers back (headless Chrome won't make a *window* narrower than ~512 px, and
+  `file://` frames are cross-origin). The probe sweeps every banner state and checks
+  that nothing sticks out past the screen edge, that no text overflows, that the
+  banner height is constant, that the bars stick when scrolled, plus the notes overlay
+  and the plot sizes.
 - Headless Chrome often runs no animation frames before dumping, so the page draws
   its first frame synchronously (`frame(performance.now())` at the end of the
   script). Don't change that back to `requestAnimationFrame(frame)`.
-- Not covered: pixel layout, Tk drawing, Safari/Firefox (not installed on the dev PC).
+- Not covered: pixel layout of the desktop stage, text inside canvases, Tk drawing,
+  Safari/Firefox and real touch devices (not available on the dev PC).
+- Desktop-layout regression check used when touching shared CSS/drawing: screenshot
+  view 1/2 + notes at 1024x768 before and after (with `Math.random` pinned to 0.5) and
+  `cmp` the PNGs. Headless Chrome output is byte-deterministic.
 
 ## Commands
 - `Feedback Phase Sim.bat` — double-click launcher (no console window).
@@ -67,6 +80,22 @@ paths and personal details.
   Root `<Configure>` (debounced) recomputes Z, resizes the named fonts in place
   (`rescale_fonts()`) and redraws. Fonts use negative = pixel sizes so DPI isn't
   applied twice. Palette/widths are final per the handoff; don't drift them.
+- **Portrait layout (HTML only, Nov 2026):** `fit()` sets `portrait = innerHeight >
+  innerWidth`, toggles class `portrait` on `<html>`, and in portrait skips the stage
+  scaling. The `.portrait` CSS block then lays the same DOM out as one column in
+  unscaled CSS px (max 720 wide), and the page scrolls. It is decided by shape, not by
+  user-agent sniffing, so a tall desktop window gets it too; landscape phones get the
+  scaled stage. Pieces:
+  `#drow` is `display: contents` so `#banner` is a child of `#stage` and can be
+  `position: sticky`. `#phasebar` sticks under it, with its `top` set by `stick()`
+  from the banner height. The banner has a `min-height` so its height doesn't change
+  between states (a test enforces that). An 8 px white `box-shadow` on both covers the
+  gutters. Order: header, diagram, banner, phase bar, plots, footer controls.
+  JS changes that apply only when narrow/portrait, with the desktop output unchanged:
+  `plot()` drops the legend to its own row when it would hit the title; view 2's Bode
+  axis uses `xlabels` [1k, 100k, 10M] when `cvR1` < 380 px wide; `drawDiagram` and
+  `drawPhasor` scale to the canvas (the phasor leaves ~62 px for the V_DIFF label).
+  `tests/js_harness.mjs` stubs `document.documentElement` for this.
 - **All controls are canvas-drawn** (`ButtonBar`, `CheckBox`, `Slider`, `PhaseBar`):
   ttk can't do solid fills / 4 px borders on Windows and is too small on a projector.
   No ttk widgets remain.
@@ -92,6 +121,10 @@ paths and personal details.
   `requestAnimationFrame`, set `S` (`setMode(2)`, `S.shape`, `S.ph[mode]`), `update()`,
   then `frame(last + 100)` x75 to fill view 2's traces. `--virtual-time-budget` alone
   leaves view 2 empty. Current shots: view 1 @150 deg; view 2 square @135 and @195.
+- `docs/phone-view2.png` (780x1688): the same scratch-copy method, but the page loads
+  in a 390x844 `<iframe>` wrapper (window 520 px wide, `--force-device-scale-factor=2`),
+  scrolled so "At the summer" sits under the sticky bars, then cropped to 780 px wide and
+  quantized to 64 colours with Pillow.
 - Retake them when the layout, palette or banner copy changes.
 
 ## Status
@@ -99,3 +132,5 @@ paths and personal details.
 - GitHub Pages is on (legacy build from `main` /), so every push to main redeploys
   https://electricyoshi.github.io/Feedback-Phase-Shift-Sim/feedback_phase_sim.html -
   the link students are given. A broken HTML on main is live within a minute or two.
+- Portrait/phone layout (2026-11-16): verified only in headless Chrome at phone
+  sizes. Not yet checked on a real iPhone (Safari) or Android phone.

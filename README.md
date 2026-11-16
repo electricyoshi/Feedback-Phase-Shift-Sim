@@ -12,7 +12,7 @@ V<sub>DIFF</sub> = V<sub>IN</sub> − βV<sub>OUT</sub> as the fed-back signal's
 banner change from green to orange as you pass 180°.
 
 Works on Windows, Mac, Chromebook and Linux in a current Chrome, Edge, Firefox or
-Safari.
+Safari, and on phones and tablets (see [Phones](#phones)).
 
 ### Offline copy
 
@@ -71,7 +71,7 @@ On Windows, double-click `Feedback Phase Sim.bat`. Or from a terminal:
 
 Python 3.8+ and nothing else — it uses only the standard library (tkinter).
 On Linux, tkinter may need `sudo apt install python3-tk`. It is the same simulation
-and layout as the browser version.
+and layout as the browser version (the phone layout is browser-only).
 
 ## The two views
 
@@ -96,6 +96,21 @@ Built for a low-resolution 4:3 classroom projector: white background, bold type,
 thick lines and a colour-blind-safe (Okabe-Ito) palette, with V<sub>FB</sub> drawn black *and*
 dashed. The whole layout is designed on a 1024 × 768 stage and scales to fill the
 window, so maximise it or press F11 on the projector.
+
+## Phones
+
+<img src="docs/phone-view2.png" width="260" align="right" alt="View 2 on a phone held upright: the banner and phase slider stay at the top while the plots scroll underneath">
+
+Held upright (portrait), a phone or tablet gets a single-column layout: the
+controls are bigger, and you scroll down through the plots. The banner and the
+phase slider stay pinned to the top of the screen, so you can drag the phase and
+watch any plot respond. The other sliders are at the bottom of the page.
+
+Turned sideways (landscape), it shows the same layout as the projector, scaled to
+fit. Any browser window that is taller than it is wide gets the single-column
+layout too.
+
+<br clear="right">
 
 ## The model
 
