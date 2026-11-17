@@ -294,6 +294,13 @@ def fmt_hz(f):
     return fmt_freq(float("%.3g" % f)) + "Hz"
 
 
+def with_unit(label, unit):
+    """Unit on the last x tick: "1MHz" after an SI prefix, "100 µs" after a number."""
+    if not unit:
+        return label
+    return label + ("" if label[-1:].isalpha() else " ") + unit
+
+
 # --------------------------------------------------------------------------
 # Subscripts.  UI strings use a tiny markup, "V_{DIFF}", for a subscript.
 # Unicode has no uppercase subscript letters and Tk labels can't mix font
@@ -588,8 +595,8 @@ class Plot:
             if self.show_x and (self.xlabels is None or v in self.xlabels):
                 # the unit rides on the last tick label instead of an axis title
                 txt = self.xfmt(v)
-                if i == len(xt) - 1 and self.xunit:
-                    txt += " " + self.xunit
+                if i == len(xt) - 1:
+                    txt = with_unit(txt, self.xunit)
                 tw = ft.measure(txt)
                 cv.create_text(min(r - tw, max(l, p - tw / 2)), b + 14 * Z, text=txt,
                                anchor="w", font=ft, fill=C_INK, tags=st)

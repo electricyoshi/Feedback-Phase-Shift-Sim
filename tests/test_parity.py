@@ -111,10 +111,13 @@ class Parity(unittest.TestCase):
         nums = [0, 0.5, 1, 2.5, -2.5, 5, -5, 25, 250, 1000, 2000, 2500, 0.125, 8.333333]
         freqs = [1, 1.2345, 8, 99.96, 100, 999.5, 1e3, 1234, 5e3, 99995, 148600, 3e5, 1e6]
         spans = [2.5 / f for f in (1, 1.25, 1.3, 100, 1250, 1300, 3e5)]
+        units = [("1M", "Hz"), ("10M", "Hz"), ("100", "Hz"), ("100", "µs"), ("2.5", "ms"), ("5", "")]
         calls = ([fn("fmtNum", v) for v in nums] + [fn("fmtFreq", v) for v in freqs]
-                 + [fn("fmtHz", v) for v in freqs] + [fn("timeUnit", s) for s in spans])
+                 + [fn("fmtHz", v) for v in freqs] + [fn("timeUnit", s) for s in spans]
+                 + [fn("withUnit", l, u) for l, u in units])
         want = ([m.fmt_num(v) for v in nums] + [m.fmt_freq(v) for v in freqs]
-                + [m.fmt_hz(v) for v in freqs] + [list(m.time_unit(s)) for s in spans])
+                + [m.fmt_hz(v) for v in freqs] + [list(m.time_unit(s)) for s in spans]
+                + [m.with_unit(l, u) for l, u in units])
         for c, g, w in zip(calls, js(calls), want):
             self.assertEqual(g, w, c)
 

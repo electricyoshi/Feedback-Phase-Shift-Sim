@@ -84,6 +84,12 @@ class View1(unittest.TestCase):
             for v in m.nice_ticks(0, 2.5 / f * mul, 4):
                 self.assertNotIn("e", m.fmt_num(v), (f, v))
 
+    def test_axis_unit_hugs_si_prefix(self):
+        self.assertEqual(m.with_unit(m.fmt_freq(1e6), "Hz"), "1MHz")
+        self.assertEqual(m.with_unit(m.fmt_freq(1e7), "Hz"), "10MHz")
+        self.assertEqual(m.with_unit("100", "µs"), "100 µs")
+        self.assertEqual(m.with_unit("5", ""), "5")
+
 
 class View2Status(unittest.TestCase):
     def test_banner_colour_follows_phase_margin(self):

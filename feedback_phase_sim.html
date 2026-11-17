@@ -364,6 +364,8 @@ function view2Status(phDeg) {             // phDeg = lag of A*B at crossover
 const fmtNum = v => String(parseFloat(v.toPrecision(3))).replace('-', '−');
 const fmtFreq = f => f >= 1e6 ? (f / 1e6) + 'M' : f >= 1e3 ? (f / 1e3) + 'k' : String(f);
 const fmtHz = f => fmtFreq(parseFloat(f.toPrecision(3))) + 'Hz';
+// unit on the last x tick: "1MHz" after an SI prefix, "100 µs" after a number
+const withUnit = (label, unit) => !unit ? label : label + (/[A-Za-z]$/.test(label) ? '' : ' ') + unit;
 const esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 const subHtml = s => esc(s).replace(/_\{([^}]*)\}/g, '<sub>$1</sub>');
 function niceTicks(lo, hi, n) {
@@ -446,7 +448,7 @@ function plot(c, o) {
     const p = px(v);
     seg(p, t, p, b, C.GRID, 2);
     if (o.noX || (o.xlabels && !o.xlabels.includes(v))) return;
-    const txt = (o.xfmt || fmtNum)(v) + (i === xt.length - 1 && o.xunit ? ' ' + o.xunit : '');
+    const lbl = (o.xfmt || fmtNum)(v), txt = i === xt.length - 1 ? withUnit(lbl, o.xunit) : lbl;
     ctx.font = font(15); ctx.fillStyle = C.INK; ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
     const tw = ctx.measureText(txt).width;
     ctx.fillText(txt, Math.min(r - tw, Math.max(l, p - tw / 2)), b + 14);
