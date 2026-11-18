@@ -218,7 +218,16 @@
 // an error, say so on the page instead of leaving a silently dead layout.
 // Own <script> block and plain old syntax, so it works even when the main
 // script does not parse.
+// Only errors from this page's own (inline) code are shown. Browsers report an
+// error from another origin's script as "Script error." with line 0, and
+// extension scripts carry their own URL; Brave on iOS injects such scripts and
+// one of them threw, putting a false alarm over a working page (Nov 2026).
+function isOwnError(msg, src, line) {
+  if (!line || msg === 'Script error.' || msg === 'Script error') return false;
+  return !src || src.split('#')[0] === location.href.split('#')[0];
+}
 window.onerror = function (msg, src, line) {
+  if (!isOwnError(msg, src, line)) return;
   var d = document.getElementById('err');
   d.textContent = 'This page hit an error (' + msg + ', line ' + line + '). Try a current version of Chrome, Edge, Firefox or Safari.';
   d.style.display = 'block';

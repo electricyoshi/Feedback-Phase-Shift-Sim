@@ -119,6 +119,39 @@ class InBrowser(unittest.TestCase):
         for c in ("cvD", "cvPA", "cvPB", "cvR1", "cvR2"):
             self.drawn(dom, c)
 
+    def dump_with(self, extra):
+        # load a scratch copy of the page with `extra` appended after the main script
+        with tempfile.TemporaryDirectory() as d:
+            page = pathlib.Path(d) / "page.html"
+            page.write_text(self.html_text().replace("</body>", extra + "</body>"), encoding="utf-8")
+            r = subprocess.run(
+                [find_browser(), "--headless=new", "--disable-gpu", "--no-first-run",
+                 "--user-data-dir=" + str(pathlib.Path(d) / "profile"),
+                 "--window-size=1024,768", "--virtual-time-budget=2000",
+                 "--dump-dom", page.as_uri()],
+                capture_output=True, encoding="utf-8", errors="replace", timeout=120)
+        self.assertIn("</html>", r.stdout, r.stderr[-2000:])
+        return r.stdout
+
+    @staticmethod
+    def html_text():
+        return HTML.read_text(encoding="utf-8")
+
+    def test_foreign_script_errors_do_not_show_the_error_bar(self):
+        # Brave on iOS injects scripts; one threw and the browser reported it as
+        # the sanitised cross-origin "Script error." at line 0.  That (and an
+        # extension's own URL) must not put the error bar over a working page.
+        dom = self.dump_with("<script>window.onerror('Script error.', '', 0, 0, null);"
+                             "window.onerror('TypeError: x', 'chrome-extension://abc/inject.js', 12);"
+                             "</script>")
+        self.check_no_error(dom)
+
+    def test_own_script_errors_still_show_the_error_bar(self):
+        dom = self.dump_with("<script>null.boom();</script>")
+        err = re.search(r'<div id="err" style="([^"]*)"[^>]*>(.*?)</div>', dom, re.S)
+        self.assertIn("display:block", err.group(1).replace(" ", ""))
+        self.assertIn("This page hit an error", err.group(2))
+
 
 # Appended to a scratch copy of the page, after the main script.  Drives the
 # page through its states and measures the layout, then posts the numbers to

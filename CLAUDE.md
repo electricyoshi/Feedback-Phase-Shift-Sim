@@ -66,6 +66,8 @@ paths and personal details.
 - `py feedback_phase_sim.py` — run with a console (use this to see tracebacks).
 - `feedback_phase_sim.html` — open in a browser (`...html#2` starts in view 2). A JS
   error shows as a red bar at the top of the page (`window.onerror` -> `#err`).
+  Only the page's own errors: `isOwnError()` drops cross-origin "Script error." /
+  line 0 and other-URL errors (Brave iOS injected scripts tripped it, 2026-11-17).
 - `py -m unittest discover -s tests -v` — run before every commit.
 
 ## Non-obvious decisions
